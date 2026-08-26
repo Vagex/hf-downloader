@@ -5,3 +5,16 @@ __pycache__/
 *.downloading
 .vscode/
 .idea/
+
+# Local task & settings data
+hf_download_tasks.json
+hf_downloader_settings.json
+hf_downloader_mirrors.json
+hf_downloader_proxies.json
+
+# Unrelated temporary and workflow files
+alice-tea-party/
+check_downloads.py
+check_minimax_nodes.py
+minimax_h3_*.json
+workflow_templates/
