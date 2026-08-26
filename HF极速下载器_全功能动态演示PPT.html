@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hugging Face 极速下载器 - 全功能模块动态演示 PPT</title>
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(22, 30, 49, 0.85);
+            --border-color: #2b3b55;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-purple: #818cf8;
+            --accent-amber: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Top Progress & Header */
+        header {
+            padding: 18px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            background: rgba(11, 15, 25, 0.8);
+            backdrop-filter: blur(12px);
+            z-index: 100;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .slide-indicator {
+            font-size: 14px;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        /* Slide Container */
+        .presentation-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 40px;
+        }
+
+        .slide {
+            position: absolute;
+            width: 100%;
+            max-width: 1200px;
+            height: 82%;
+            opacity: 0;
+            transform: translateX(60px) scale(0.97);
+            pointer-events: none;
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide.active {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+            pointer-events: auto;
+        }
+
+        .slide.prev {
+            opacity: 0;
+            transform: translateX(-60px) scale(0.97);
+        }
+
+        /* Slide Layout Components */
+        .slide-header {
+            margin-bottom: 28px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+        }
+
+        .badge-blue { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); border: 1px solid rgba(56,189,248,0.3); }
+        .badge-green { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border: 1px solid rgba(16,185,129,0.3); }
+        .badge-amber { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245,158,11,0.3); }
+        .badge-purple { background: rgba(129, 140, 248, 0.15); color: var(--accent-purple); border: 1px solid rgba(129,140,248,0.3); }
+
+        h1.title {
+            font-size: 42px;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #ffffff 40%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        h2.subtitle {
+            font-size: 18px;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 28px;
+            align-items: center;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        /* Feature Cards */
+        .feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease, border-color 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent-blue);
+        }
+
+        .card-icon {
+            font-size: 32px;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .card-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* Interactive Simulation Windows */
+        .sim-window {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        }
+
+        .sim-titlebar {
+            background: #1e293b;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .sim-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .dot-red { background: #ef4444; }
+        .dot-yellow { background: #f59e0b; }
+        .dot-green { background: #10b981; }
+
+        .sim-content {
+            padding: 18px;
+            font-family: "Consolas", monospace;
+            font-size: 13px;
+        }
+
+        /* Animation Keyframes */
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.2); }
+            50% { box-shadow: 0 0 40px rgba(56, 189, 248, 0.5); }
+        }
+
+        .pulse-box {
+            animation: pulseGlow 3s infinite ease-in-out;
+        }
+
+        /* Progress Bar Simulation */
+        .sim-progress-track {
+            height: 8px;
+            background: #1e293b;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 12px 0 6px;
+        }
+
+        .sim-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #38bdf8, #10b981);
+            width: 0%;
+            border-radius: 4px;
+            transition: width 2s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        /* Controls Footer */
+        footer {
+            padding: 16px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: rgba(11, 15, 25, 0.8);
+            backdrop-filter: blur(12px);
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #fff;
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: #334155;
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            color: #0f172a;
+            border-color: var(--accent-blue);
+        }
+
+        .btn-primary:hover {
+            background: #7dd3fc;
+            color: #0f172a;
+        }
+
+        .autoplay-status {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .autoplay-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="brand">
+            <span>🚀</span>
+            <span>Hugging Face 极速下载器 Pro</span>
+        </div>
+        <div class="slide-indicator" id="slideIndicator">Slide 1 / 6</div>
+    </header>
+
+    <!-- Presentation Area -->
+    <div class="presentation-container">
+
+        <!-- Slide 1: Cover -->
+        <div class="slide active" id="slide-1">
+            <div class="slide-header">
+                <span class="badge badge-blue">全功能动态演播</span>
+                <h1 class="title">新一代 AI 模型极速多线程与断点续传下载器</h1>
+                <h2 class="subtitle">专为 AI 创作者、ComfyUI / SD 玩家与大模型研究员量身定制的终极下载利器</h2>
+            </div>
+            <div class="grid-3">
+                <div class="feature-card">
+                    <div class="card-icon">⚡</div>
+                    <div class="card-title">国内镜像 满速直连</div>
+                    <div class="card-desc">内置官方认证高可用镜像与代理热切换，千兆宽带无需科学上网即可极速狂飙。</div>
+                </div>
+                <div class="feature-card">
+                    <div class="card-icon">🛡️</div>
+                    <div class="card-title">真正的断点续传</div>
+                    <div class="card-desc">即使在 99% 时关机断网，重启一秒恢复已有切片，大文件告别重复下载噩梦。</div>
+                </div>
+                <div class="feature-card">
+                    <div class="card-icon">🛠️</div>
+                    <div class="card-title">ComfyUI 一键部署</div>
+                    <div class="card-desc">智能扫描并一键生成全套模型目录，内置清华源极速安装 Python 核心加速组件。</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 2: Tab 3 一键部署与环境配置 -->
+        <div class="slide" id="slide-2">
+            <div class="slide-header">
+                <span class="badge badge-green">Tab 3 核心亮点</span>
+                <h1 class="title">一键部署 ComfyUI 模型目录与依赖自检</h1>
+                <h2 class="subtitle">全盘智能识别 ComfyUI 路径，1 秒补全 7 大常用分类模型文件夹</h2>
+            </div>
+            <div class="grid-2">
+                <div>
+                    <div class="feature-card" style="margin-bottom: 16px;">
+                        <div class="card-title">📁 7 大预设模型目录一键创建</div>
+                        <div class="card-desc">自动检测并生成 <code>diffusion_models</code>、<code>controlnet</code>、<code>checkpoints</code>、<code>loras</code>、<code>vae</code>、<code>unet</code>、<code>clip</code>，并提供快捷打开按钮。</div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="card-title">⚡ 清华源 Python 依赖一键升级</div>
+                        <div class="card-desc">自检 <code>huggingface_hub</code>、<code>requests</code>、<code>hf_transfer</code>，一键极速修复环境缺失。</div>
+                    </div>
+                </div>
+                <div class="sim-window pulse-box">
+                    <div class="sim-titlebar">
+                        <div class="sim-dot dot-red"></div>
+                        <div class="sim-dot dot-yellow"></div>
+                        <div class="sim-dot dot-green"></div>
+                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">ComfyUI 目录状态与一键部署</span>
+                    </div>
+                    <div class="sim-content">
+                        <p style="color: #38bdf8;">[✓] ComfyUI 路径: F:\ComfyUI-aki-v3\ComfyUI\models</p>
+                        <p style="color: #10b981; margin-top: 6px;">[✓] 扩散模型 (diffusion_models) -> 已就绪</p>
+                        <p style="color: #10b981;">[✓] 控制网络 (controlnet) -> 已就绪</p>
+                        <p style="color: #10b981;">[✓] 大模型底模 (checkpoints) -> 已就绪</p>
+                        <p style="color: #10b981;">[✓] 微调模型 (loras) -> 已就绪</p>
+                        <p style="color: #f59e0b; margin-top: 6px;">⚡ Python 核心组件检测: 全部正常 (0.28.1)</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 3: Tab 1 仓库探索与目录树 -->
+        <div class="slide" id="slide-3">
+            <div class="slide-header">
+                <span class="badge badge-amber">Tab 1 核心亮点</span>
+                <h1 class="title">阶梯式层级目录树与极速文件挑拣</h1>
+                <h2 class="subtitle">告别繁琐的网页点击，多级缩进展开/折叠，批量挑拣与整包入队</h2>
+            </div>
+            <div class="grid-2">
+                <div class="sim-window">
+                    <div class="sim-titlebar">
+                        <div class="sim-dot dot-red"></div>
+                        <div class="sim-dot dot-yellow"></div>
+                        <div class="sim-dot dot-green"></div>
+                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">仓库文件浏览器 (Kijai/MiniMax-H3)</span>
+                    </div>
+                    <div class="sim-content">
+                        <p style="color: #f8fafc;">📁 仓库目录层级树:</p>
+                        <p style="color: #94a3b8; padding-left: 12px;">▼ 📂 controlnet</p>
+                        <p style="color: #38bdf8; padding-left: 28px;">☑ MiniMax_H3_controlnet.safetensors (1.24 GB)</p>
+                        <p style="color: #38bdf8; padding-left: 28px;">☑ config.json (2.4 KB)</p>
+                        <p style="color: #94a3b8; padding-left: 12px;">▶ 📁 diffusion_models (已折叠)</p>
+                    </div>
+                </div>
+                <div>
+                    <div class="feature-card" style="margin-bottom: 16px;">
+                        <div class="card-title">🌲 阶梯式缩进与展开/折叠</div>
+                        <div class="card-desc">左侧清晰呈现多级子目录结构，右侧表格展示精确文件大小、修改日期与单选下载按钮。</div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="card-title">📦 一键目录整包入队</div>
+                        <div class="card-desc">支持全选当前目录或点击“目录整包入队”，一键打包自动分析全部子文件加入下载队列。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: Tab 2 极速队列与断点续传 -->
+        <div class="slide" id="slide-4">
+            <div class="slide-header">
+                <span class="badge badge-purple">Tab 2 核心亮点</span>
+                <h1 class="title">多任务队列调度与大文件断点续传</h1>
+                <h2 class="subtitle">实时带宽速率监控、剩余时间预估、磁盘剩余空间自动预警</h2>
+            </div>
+            <div class="grid-2">
+                <div>
+                    <div class="feature-card" style="margin-bottom: 16px;">
+                        <div class="card-title">⏸️ 任意暂停与平滑终止</div>
+                        <div class="card-desc">临时文件使用 <code>.downloading</code> 保护，随时暂停或退出程序，切片绝对不损坏。</div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="card-title">📊 全局进度与实时速率监控</div>
+                        <div class="card-desc">底部全局进度条实时计算总进度、瞬时下行速率 (MB/s) 与 ETA 预计完成倒计时。</div>
+                    </div>
+                </div>
+                <div class="sim-window">
+                    <div class="sim-titlebar">
+                        <div class="sim-dot dot-red"></div>
+                        <div class="sim-dot dot-yellow"></div>
+                        <div class="sim-dot dot-green"></div>
+                        <span style="font-size: 11px; color: #94a3b8; margin-left: 8px;">下载任务队列实时监控</span>
+                    </div>
+                    <div class="sim-content">
+                        <p style="color: #38bdf8;">[1] MiniMax_H3_controlnet.safetensors</p>
+                        <div class="sim-progress-track">
+                            <div class="sim-progress-fill" id="demoProgress"></div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; color: #94a3b8; font-size: 12px; margin-top: 4px;">
+                            <span id="demoPct">进度: 84.5%</span>
+                            <span style="color: #10b981; font-weight: bold;">速度: 48.2 MB/s</span>
+                            <span>ETA: 00:00:15</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 5: 网络配置与 Token 安全 -->
+        <div class="slide" id="slide-5">
+            <div class="slide-header">
+                <span class="badge badge-blue">网络与安全</span>
+                <h1 class="title">镜像管理、代理测速与 Token 加密</h1>
+                <h2 class="subtitle">一键检测代理连通性，私有/受限模型（FLUX / Llama）轻松畅下</h2>
+            </div>
+            <div class="grid-3">
+                <div class="feature-card">
+                    <div class="card-icon">🌐</div>
+                    <div class="card-title">国内镜像动态增删</div>
+                    <div class="card-desc">内置高速镜像节点，支持可视化添加私有镜像源，永久配置文件持久保存。</div>
+                </div>
+                <div class="feature-card">
+                    <div class="card-icon">⚡</div>
+                    <div class="card-title">代理连通性毫秒测速</div>
+                    <div class="card-desc">支持 HTTP / SOCKS5 代理热切换，提供一键测试握手延迟，排查网络故障。</div>
+                </div>
+                <div class="feature-card">
+                    <div class="card-icon">🔒</div>
+                    <div class="card-title">Token 密码级安全遮蔽</div>
+                    <div class="card-desc">HF Token 采用小眼睛切换与本地密文存储，保护个人账号信息与访问权限。</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 6: 结尾行动召唤 -->
+        <div class="slide" id="slide-6">
+            <div class="slide-header" style="text-align: center; margin-bottom: 32px;">
+                <span class="badge badge-green">立刻体验</span>
+                <h1 class="title">开启您的 AI 模型极速下载新体验！</h1>
+                <h2 class="subtitle">零依赖、秒启动、无黑框、全开源 —— 提升 10 倍下载生产力</h2>
+            </div>
+            <div class="feature-card" style="max-width: 650px; margin: 0 auto; text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 12px;">🎉</div>
+                <div class="card-title" style="font-size: 22px;">双击即可运行，绿色免安装</div>
+                <div class="card-desc" style="margin-bottom: 20px;">
+                    运行 <code>启动极速下载器(无黑框).vbs</code> 立即体验丝滑流畅的下载之旅！
+                </div>
+                <button class="btn btn-primary" style="margin: 0 auto; padding: 10px 24px; font-size: 15px;" onclick="goToSlide(0)">
+                    🔄 重新播放动态演示
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Footer Controls -->
+    <footer>
+        <div class="autoplay-status">
+            <div class="autoplay-indicator" id="autoPlayDot"></div>
+            <span id="autoPlayText">自动演示中 (每 6 秒切换)</span>
+        </div>
+        <div class="nav-buttons">
+            <button class="btn" onclick="prevSlide()">◀ 上一页</button>
+            <button class="btn" id="btnPlayPause" onclick="toggleAutoPlay()">⏸ 暂停</button>
+            <button class="btn btn-primary" onclick="nextSlide()">下一页 ▶</button>
+        </div>
+    </footer>
+
+    <script>
+        const slides = document.querySelectorAll('.slide');
+        let currentSlide = 0;
+        let isAutoPlay = true;
+        let autoPlayTimer = null;
+
+        function updateSlide() {
+            slides.forEach((slide, idx) => {
+                slide.classList.remove('active', 'prev');
+                if (idx === currentSlide) {
+                    slide.classList.add('active');
+                } else if (idx < currentSlide) {
+                    slide.classList.add('prev');
+                }
+            });
+            document.getElementById('slideIndicator').innerText = `Slide ${currentSlide + 1} / ${slides.length}`;
+
+            // Trigger progress simulation animation on slide 4
+            if (currentSlide === 3) {
+                setTimeout(() => {
+                    const fill = document.getElementById('demoProgress');
+                    if (fill) fill.style.width = '85%';
+                }, 300);
+            } else {
+                const fill = document.getElementById('demoProgress');
+                if (fill) fill.style.width = '0%';
+            }
+        }
+
+        function nextSlide() {
+            currentSlide = (currentSlide + 1) % slides.length;
+            updateSlide();
+        }
+
+        function prevSlide() {
+            currentSlide = (currentSlide - 1 + slides.length) % slides.length;
+            updateSlide();
+        }
+
+        function goToSlide(idx) {
+            currentSlide = idx;
+            updateSlide();
+        }
+
+        function toggleAutoPlay() {
+            isAutoPlay = !isAutoPlay;
+            const dot = document.getElementById('autoPlayDot');
+            const txt = document.getElementById('autoPlayText');
+            const btn = document.getElementById('btnPlayPause');
+
+            if (isAutoPlay) {
+                dot.style.background = 'var(--accent-green)';
+                txt.innerText = '自动演示中 (每 6 秒切换)';
+                btn.innerText = '⏸ 暂停';
+                startTimer();
+            } else {
+                dot.style.background = 'var(--accent-amber)';
+                txt.innerText = '已暂停自动演示 (手动控制)';
+                btn.innerText = '▶ 播放';
+                clearInterval(autoPlayTimer);
+            }
+        }
+
+        function startTimer() {
+            clearInterval(autoPlayTimer);
+            autoPlayTimer = setInterval(() => {
+                if (isAutoPlay) {
+                    nextSlide();
+                }
+            }, 6000);
+        }
+
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'Space') {
+                nextSlide();
+            } else if (e.key === 'ArrowLeft') {
+                prevSlide();
+            }
+        });
+
+        startTimer();
+    </script>
+</body>
+</html>

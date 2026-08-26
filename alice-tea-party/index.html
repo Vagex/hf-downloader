@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>爱丽丝的茶话世界 - 3D WebGL Wonderland Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="canvas-container"></div>
+
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-overlay">
+      <div class="loading-card">
+        <div class="teacup-loader">
+          <div class="tea-surface"></div>
+          <div class="steam steam-1"></div>
+          <div class="steam steam-2"></div>
+        </div>
+        <h1 class="wonderland-title">爱丽丝的茶话世界</h1>
+        <p class="loading-subtext">正在生成仙境棋盘、疯狂茶会与魔法浮岛...</p>
+        <div class="progress-bar-wrap">
+          <div id="loading-bar" class="progress-bar-fill"></div>
+        </div>
+        <button id="start-btn" class="start-btn hidden">☕ 开启仙境冒险 ☕</button>
+      </div>
+    </div>
+
+    <!-- In-Game HUD -->
+    <div id="hud-overlay" class="hud-container hidden">
+      <!-- Top Navigation / Status Bar -->
+      <header class="hud-header">
+        <div class="brand-badge">
+          <span class="game-logo">✨ 爱丽丝的茶话世界</span>
+        </div>
+
+        <div class="alice-state-badge" id="size-status">
+          <span class="status-icon">👗</span>
+          <span id="size-label">标准形态 (1.0x)</span>
+        </div>
+
+        <div class="hud-actions">
+          <button id="btn-sound" class="icon-btn" title="开关音效与音乐">🔊</button>
+          <button id="btn-closet" class="icon-btn" title="换装衣橱">👗</button>
+          <button id="btn-quests" class="icon-btn" title="任务清单">📜</button>
+          <button id="btn-photo" class="icon-btn highlight" title="梦幻拍照模式">📸 拍照</button>
+        </div>
+      </header>
+
+      <!-- Minimap Radar -->
+      <div class="minimap-container">
+        <canvas id="minimap-canvas" width="130" height="130"></canvas>
+        <div class="minimap-label">仙境罗盘</div>
+      </div>
+
+      <!-- Left Quest Widget -->
+      <div class="quest-widget glass-card">
+        <div class="quest-widget-header">
+          <h3>🎯 当前任务</h3>
+        </div>
+        <div id="active-quest-info" class="quest-widget-body">
+          <div class="quest-title" id="current-quest-title">1. 搜集茶会点心</div>
+          <div class="quest-desc" id="current-quest-desc">在仙境花园中收集方糖、马卡龙与仙境茶叶。</div>
+          <div class="quest-progress-bar">
+            <div id="quest-progress-fill" class="fill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Action Prompt -->
+      <div id="action-prompt" class="action-prompt hidden">
+        <div class="key-badge">E</div>
+        <span id="action-text">按 [E] 喝下变小药水</span>
+      </div>
+
+      <!-- Bottom Inventory Bar -->
+      <footer class="inventory-bar glass-card">
+        <div class="inv-item" title="方糖">
+          <span class="inv-icon">🍬</span>
+          <span class="inv-count" id="count-sugar">0/3</span>
+        </div>
+        <div class="inv-item" title="马卡龙">
+          <span class="inv-icon">🧁</span>
+          <span class="inv-count" id="count-macaron">0/3</span>
+        </div>
+        <div class="inv-item" title="仙境茶叶">
+          <span class="inv-icon">🌿</span>
+          <span class="inv-count" id="count-tea">0/2</span>
+        </div>
+        <div class="inv-divider"></div>
+        <div class="inv-item" title="已刷红玫瑰">
+          <span class="inv-icon">🌹</span>
+          <span class="inv-count" id="count-roses">0/4</span>
+        </div>
+        <div class="inv-item" title="黄金时间钥匙">
+          <span class="inv-icon">🔑</span>
+          <span class="inv-count" id="count-keys">0/1</span>
+        </div>
+      </footer>
+
+      <!-- Mobile Touch Controls -->
+      <div id="touch-controls" class="touch-overlay">
+        <div id="joystick-zone" class="joystick-base">
+          <div id="joystick-stick" class="joystick-stick"></div>
+        </div>
+        <div class="touch-actions">
+          <button id="touch-jump-btn" class="touch-btn jump-btn">跳跃</button>
+          <button id="touch-action-btn" class="touch-btn action-btn">互动 (E)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Dialogue Modal -->
+    <div id="dialogue-modal" class="modal-overlay hidden">
+      <div class="dialogue-card glass-card">
+        <div class="dialogue-avatar" id="dialogue-avatar">🎩</div>
+        <div class="dialogue-content">
+          <div class="speaker-name" id="speaker-name">疯帽客</div>
+          <div class="speaker-text" id="speaker-text">“欢迎来到疯狂茶会！但是缺少了甜点与红茶，请帮我们准备齐备吧！”</div>
+          <div class="dialogue-options" id="dialogue-options">
+            <button class="dialogue-btn" id="dialogue-next-btn">明白！(继续)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quest Log Modal -->
+    <div id="quest-modal" class="modal-overlay hidden">
+      <div class="modal-card glass-card">
+        <div class="modal-header">
+          <h2>📜 仙境茶会任务清单</h2>
+          <button class="close-btn" id="close-quest-modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="quest-list">
+            <div class="quest-card-item" id="qitem-1">
+              <div class="q-icon">☕</div>
+              <div class="q-details">
+                <h4>1. 疯帽客的茶会准备</h4>
+                <p>在中央大茶几周边收集 3 块巨型方糖、3 个色彩马卡龙和 2 份魔幻茶叶。</p>
+                <span class="q-badge" id="qbadge-1">未完成</span>
+              </div>
+            </div>
+
+            <div class="quest-card-item" id="qitem-2">
+              <div class="q-icon">🌹</div>
+              <div class="q-details">
+                <h4>2. 给红心王后的白玫瑰涂红</h4>
+                <p>获取魔法刷，避开巡逻的扑克牌侍卫，将花园中的 4 朵白玫瑰刷成鲜红色。</p>
+                <span class="q-badge" id="qbadge-2">未完成</span>
+              </div>
+            </div>
+
+            <div class="quest-card-item" id="qitem-3">
+              <div class="q-icon">😸</div>
+              <div class="q-details">
+                <h4>3. 柴郡猫的奇幻笑脸与谜题</h4>
+                <p>在迷雾中找到柴郡猫发光的隐形笑脸，解答它的谜语解锁通往天空怀表的彩虹道。</p>
+                <span class="q-badge" id="qbadge-3">未完成</span>
+              </div>
+            </div>
+
+            <div class="quest-card-item" id="qitem-4">
+              <div class="q-icon">⏰</div>
+              <div class="q-details">
+                <h4>4. 三月兔的钟表齿轮平台</h4>
+                <p>跳跃跨越旋转的怀表齿轮与茶壶喷泉浮岛，拿到高空锁盒中的黄金时间钥匙。</p>
+                <span class="q-badge" id="qbadge-4">未完成</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wardrobe Closet Modal -->
+    <div id="closet-modal" class="modal-overlay hidden">
+      <div class="modal-card glass-card">
+        <div class="modal-header">
+          <h2>👗 爱丽丝的华丽衣橱</h2>
+          <button class="close-btn" id="close-closet-modal">✕</button>
+        </div>
+        <div class="modal-body closet-grid">
+          <div class="closet-section">
+            <h3>经典礼服颜色</h3>
+            <div class="color-options">
+              <button class="color-btn active" data-color="#3b82f6" style="background:#3b82f6;" title="经典仙境蓝"></button>
+              <button class="color-btn" data-color="#ec4899" style="background:#ec4899;" title="浪漫草莓粉"></button>
+              <button class="color-btn" data-color="#8b5cf6" style="background:#8b5cf6;" title="梦幻熏衣紫"></button>
+              <button class="color-btn" data-color="#10b981" style="background:#10b981;" title="薄荷仙境绿"></button>
+              <button class="color-btn" data-color="#f59e0b" style="background:#f59e0b;" title="皇家暖阳金"></button>
+            </div>
+          </div>
+          <div class="closet-section">
+            <h3>奇幻头饰装扮</h3>
+            <div class="hat-options">
+              <button class="hat-btn active" data-hat="bow">🎀 蓝金蝴蝶结</button>
+              <button class="hat-btn" data-hat="top-hat">🎩 疯帽客高顶帽</button>
+              <button class="hat-btn" data-hat="cat-ears">😸 柴郡猫发饰</button>
+              <button class="hat-btn" data-hat="rabbit-ears">🐰 兔耳朵配饰</button>
+              <button class="hat-btn" data-hat="crown">👑 红心小皇冠</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Photo Mode Overlay -->
+    <div id="photo-overlay" class="photo-studio-hud hidden">
+      <div class="photo-controls glass-card">
+        <div class="photo-title">📸 仙境摄影棚</div>
+        <div class="filter-selector">
+          <label>滤镜风格：</label>
+          <button class="filter-btn active" data-filter="none">原汁原味</button>
+          <button class="filter-btn" data-filter="dreamy">梦幻粉紫</button>
+          <button class="filter-btn" data-filter="vintage">复古仙境</button>
+          <button class="filter-btn" data-filter="golden">金色黄昏</button>
+          <button class="filter-btn" data-filter="cyber">赛博奇境</button>
+        </div>
+        <div class="photo-actions">
+          <button id="take-snapshot-btn" class="primary-btn">📷 拍下精彩瞬间</button>
+          <button id="exit-photo-btn" class="secondary-btn">退出拍照</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Victory Modal -->
+    <div id="victory-modal" class="modal-overlay hidden">
+      <div class="victory-card glass-card">
+        <div class="victory-icon">🎉</div>
+        <h2>茶会大圆满！</h2>
+        <p>你完美完成了爱丽丝仙境茶会的所有任务！疯帽客、三月兔与柴郡猫为你欢呼！</p>
+        <div class="victory-stats">
+          <div><span class="v-num">4/4</span> 任务达成</div>
+          <div><span class="v-num">100%</span> 仙境探索</div>
+        </div>
+        <button id="victory-replay-btn" class="primary-btn wide-btn">☕ 继续游览茶话世界 ☕</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
