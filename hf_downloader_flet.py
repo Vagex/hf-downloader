@@ -966,28 +966,71 @@ def main(page: ft.Page):
         if is_queue_running:
             return
 
-        pending = [t for t in tasks if t.status in ("等待中", "已中断", "已暂停", "失败")]
-        if not pending:
-            show_snack("当前没有需要下载的任务。")
-            return
+        has_selection = bool(checked_tasks)
+        if has_selection:
+            pending = [t for t in tasks if t.task_id in checked_tasks and t.status in ("等待中", "已中断", "已暂停", "失败")]
+            if not pending:
+                sel_tasks = [t for t in tasks if t.task_id in checked_tasks]
+                if sel_tasks and all(t.status == "已完成" for t in sel_tasks):
+                    for t in sel_tasks:
+                        t.clean_local_files_and_caches()
+                        t.status = "等待中"
+                        t.progress = 0.0
+                    refresh_queue_view()
+                    save_tasks()
+                    pending = sel_tasks
+                    show_snack("已重置勾选的已完成任务并开始重新下载。")
+                else:
+                    show_snack("所勾选的任务中没有需要下载的任务。")
+                    return
+        else:
+            pending = [t for t in tasks if t.status in ("等待中", "已中断", "已暂停", "失败")]
+            if not pending:
+                show_snack("当前队列中没有需要下载的任务。")
+                return
 
         is_queue_running = True
         stop_queue_requested = False
         btn_start_q.disabled = True
         btn_stop_q.disabled = False
-        lbl_global_status.value = "状态: 队列下载中..."
+        
+        mode_str = f"勾选的 {len(pending)} 个任务" if has_selection else f"全队列 ({len(pending)} 个任务)"
+        lbl_global_status.value = f"状态: 正在下载 [{mode_str}]..."
         page.update()
+        log(f"\n[*] 启动下载队列: 目标为 {mode_str}...")
 
         threading.Thread(target=_queue_worker, daemon=True).start()
 
     def stop_queue(e):
         nonlocal stop_queue_requested, cancel_current_task
-        if is_queue_running:
+        if not is_queue_running:
+            if checked_tasks:
+                for t in tasks:
+                    if t.task_id in checked_tasks and t.status in ("等待中", "下载中"):
+                        t.status = "已暂停"
+                refresh_queue_view()
+                save_tasks()
+                show_snack(f"已将勾选的 {len(checked_tasks)} 个任务标记为已暂停。")
+            return
+
+        has_selection = bool(checked_tasks)
+        if has_selection:
+            for t in tasks:
+                if t.task_id in checked_tasks:
+                    if t.status == "下载中":
+                        cancel_current_task = True
+                    t.status = "已暂停"
+            refresh_queue_view()
+            save_tasks()
+            if not active_task_id or active_task_id in checked_tasks:
+                stop_queue_requested = True
+                reset_global_progress("已暂停勾选的任务")
+                log("[!] 收到指令，已暂停勾选的任务。")
+        else:
             stop_queue_requested = True
             cancel_current_task = True
-            log("[!] 收到暂停指令，正在平稳中断并保存进度...")
-            lbl_global_status.value = "状态: 正在暂停..."
-            page.update()
+            reset_global_progress("正在终止队列...")
+            log("[!] 收到终止指令，已中断当前任务并保存进度。")
 
     def _queue_worker():
         nonlocal is_queue_running, active_task_id
@@ -995,10 +1038,17 @@ def main(page: ft.Page):
 
         while is_queue_running and not stop_queue_requested:
             current_task = None
+            has_selection = bool(checked_tasks)
+
             for t in tasks:
-                if t.status in ("等待中", "已中断", "已暂停"):
-                    current_task = t
-                    break
+                if has_selection:
+                    if t.task_id in checked_tasks and t.status in ("等待中", "已中断", "已暂停", "失败"):
+                        current_task = t
+                        break
+                else:
+                    if t.status in ("等待中", "已中断", "已暂停", "失败"):
+                        current_task = t
+                        break
 
             if not current_task:
                 break

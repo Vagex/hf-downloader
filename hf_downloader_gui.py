@@ -2857,21 +2857,72 @@ class HFDownloaderApp(tk.Tk):
         if self.is_queue_running:
             return
 
-        pending_tasks = [t for t in self.tasks if t.status in ("等待中", "已中断", "已暂停", "失败")]
-        if not pending_tasks:
-            messagebox.showinfo("提示", "当前没有需要下载的任务（全部已完成或队列为空）。")
-            return
+        has_selection = bool(self.checked_tasks)
+        if has_selection:
+            # Check if selected tasks have non-completed tasks
+            pending_tasks = [t for t in self.tasks if t.task_id in self.checked_tasks and t.status in ("等待中", "已中断", "已暂停", "失败")]
+            if not pending_tasks:
+                # If all selected are completed or something else, prompt or activate them
+                sel_tasks = [t for t in self.tasks if t.task_id in self.checked_tasks]
+                if sel_tasks and all(t.status == "已完成" for t in sel_tasks):
+                    choice = messagebox.askyesno("重新下载", "所勾选的任务均已完成，是否重新下载勾选的任务？")
+                    if choice:
+                        for t in sel_tasks:
+                            t.clean_local_files_and_caches()
+                            t.status = "等待中"
+                            t.progress = 0.0
+                        self._refresh_queue_tree()
+                        self._save_tasks()
+                        pending_tasks = sel_tasks
+                    else:
+                        return
+                else:
+                    messagebox.showinfo("提示", "所勾选的任务中没有需要下载的任务。")
+                    return
+        else:
+            pending_tasks = [t for t in self.tasks if t.status in ("等待中", "已中断", "已暂停", "失败")]
+            if not pending_tasks:
+                messagebox.showinfo("提示", "当前队列中没有需要下载的任务（全部已完成或队列为空）。")
+                return
 
         self.is_queue_running = True
         self.stop_queue_requested = False
         self.btn_start_queue.config(state=tk.DISABLED)
         self.btn_stop_queue.config(state=tk.NORMAL)
-        self.lbl_status.config(text="状态: 队列正在下载中...", foreground="blue")
+        
+        mode_desc = f"勾选的 {len(pending_tasks)} 个任务" if has_selection else f"全队列 ({len(pending_tasks)} 个任务)"
+        self.lbl_status.config(text=f"状态: 正在下载 [{mode_desc}]...", foreground="blue")
+        self.log(f"\n[*] 启动下载队列: 目标为 {mode_desc}...")
 
         threading.Thread(target=self._queue_worker, daemon=True).start()
 
     def stop_queue_download(self):
-        if self.is_queue_running:
+        if not self.is_queue_running:
+            # If not running but has selected tasks, mark selected waiting tasks as paused
+            if self.checked_tasks:
+                for t in self.tasks:
+                    if t.task_id in self.checked_tasks and t.status in ("等待中", "下载中"):
+                        t.status = "已暂停"
+                self._refresh_queue_tree()
+                self._save_tasks()
+                self.log(f"[!] 已将勾选的 {len(self.checked_tasks)} 个任务标记为已暂停。")
+            return
+
+        has_selection = bool(self.checked_tasks)
+        if has_selection:
+            for t in self.tasks:
+                if t.task_id in self.checked_tasks:
+                    if t.status == "下载中":
+                        self.cancel_current_task = True
+                    t.status = "已暂停"
+            self._refresh_queue_tree()
+            self._save_tasks()
+            # If the current active task was in selection or user requested stop, pause
+            if not self.active_task_id or self.active_task_id in self.checked_tasks:
+                self.stop_queue_requested = True
+                self._reset_progress_ui("已暂停勾选的任务")
+                self.log(f"[!] 收到指令，已暂停勾选的任务。")
+        else:
             self.stop_queue_requested = True
             self.cancel_current_task = True
             self._reset_progress_ui("正在终止/暂停队列...")
@@ -2883,10 +2934,19 @@ class HFDownloaderApp(tk.Tk):
 
         while self.is_queue_running and not self.stop_queue_requested:
             current_task = None
+            has_selection = bool(self.checked_tasks)
+
             for t in self.tasks:
-                if t.status in ("等待中", "已中断", "已暂停"):
-                    current_task = t
-                    break
+                if has_selection:
+                    # Only process tasks in checked_tasks
+                    if t.task_id in self.checked_tasks and t.status in ("等待中", "已中断", "已暂停", "失败"):
+                        current_task = t
+                        break
+                else:
+                    # Process any pending task in queue
+                    if t.status in ("等待中", "已中断", "已暂停", "失败"):
+                        current_task = t
+                        break
 
             if not current_task:
                 break
