@@ -1137,7 +1137,7 @@ class HFDownloaderApp(tk.Tk):
         self.log(f"[✓] 网络代理列表已更新并永久保存 (当前共有 {len(self.proxies_list)} 个配置项)。")
 
     def open_env_setup(self):
-        self.notebook.select(2)
+        self.notebook.select(3)
         self._check_tab_env_status()
         self._refresh_tab_env_dirs()
 
@@ -1258,9 +1258,6 @@ class HFDownloaderApp(tk.Tk):
 
         self.btn_fetch = ttk.Button(config_frame, text=" 获取文件列表", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_files)
         self.btn_fetch.grid(row=0, column=6, padx=4, pady=3)
-
-        btn_env_setup = ttk.Button(config_frame, text=" 一键部署环境...", image=self.icons["rocket"], compound=tk.LEFT, command=self.open_env_setup)
-        btn_env_setup.grid(row=0, column=7, padx=4, pady=3)
 
         # Row 1: Mirror selector with custom management button & Token input with visibility toggle
         ttk.Label(config_frame, text="下载镜像源:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=3)
