@@ -2268,8 +2268,8 @@ def main(page: ft.Page):
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
                 ft.Text("加速节点:", size=13, weight=ft.FontWeight.BOLD), dd_gh_mirror,
-                ft.Text("GitHub Token:", size=13, weight=ft.FontWeight.BOLD), tf_gh_token,
-                ft.ElevatedButton("检测加速节点", icon=ft.Icons.BOLT, on_click=test_gh_node, height=38)
+                ft.ElevatedButton("检测加速节点", icon=ft.Icons.BOLT, on_click=test_gh_node, height=38),
+                ft.Text("GitHub Token:", size=13, weight=ft.FontWeight.BOLD), tf_gh_token
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
                 ft.Text("分类预设:", size=13, weight=ft.FontWeight.BOLD), dd_gh_preset,
