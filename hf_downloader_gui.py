@@ -3598,7 +3598,7 @@ class HFDownloaderApp(tk.Tk):
         self.tree_tw_variants.bind("<space>", self._on_tw_tree_space)
         self.tree_tw_variants.bind("<Double-1>", lambda e: self.add_twitter_to_queue(jump=False))
 
-        # Bottom Actions Bar of Tab 3 (Unified with Tab 1 & Tab 2)
+        # Bottom Actions Bar of Tab 3
         tw_act_frame = ttk.Frame(self.tab_twitter)
         tw_act_frame.pack(fill=tk.X, pady=(4, 0))
 
@@ -3608,14 +3608,8 @@ class HFDownloaderApp(tk.Tk):
         )
         btn_tw_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
 
-        btn_tw_highest = ttk.Button(
-            tw_act_frame, text=" 下载最高画质 (1080P/720P)", image=self.icons["rocket"], compound=tk.LEFT,
-            command=self.quick_download_twitter_highest
-        )
-        btn_tw_highest.pack(side=tk.LEFT, padx=4, ipady=3)
-
         btn_tw_add_jump = ttk.Button(
-            tw_act_frame, text=" 入队并跳转到队列", image=self.icons["play"], compound=tk.LEFT,
+            tw_act_frame, text=" 入队并跳转到队列", image=self.icons["rocket"], compound=tk.LEFT,
             command=lambda: self.add_twitter_to_queue(jump=True)
         )
         btn_tw_add_jump.pack(side=tk.LEFT, padx=4, ipady=3)
