@@ -18,6 +18,8 @@ if sys.platform == "win32":
         pass
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import flet as ft
 
 try:
@@ -169,10 +171,10 @@ PRESET_DIRS_MAP = {
 
 # Default GitHub Accelerators
 DEFAULT_GITHUB_ACCELERATORS = [
-    "https://ghproxy.net/",
-    "https://github.moeyy.xyz/",
-    "https://mirror.ghproxy.com/",
     "https://ghfast.top/",
+    "https://ghproxy.net/",
+    "https://mirror.ghproxy.com/",
+    "https://github.moeyy.xyz/",
     "不使用加速 (官方直连)"
 ]
 
@@ -1238,71 +1240,98 @@ def main(page: ft.Page):
             if downloaded_bytes > 0:
                 req_headers["Range"] = f"bytes={downloaded_bytes}-"
 
-        try:
-            with requests.get(url, headers=req_headers, proxies=proxies, stream=True, timeout=30, allow_redirects=True) as resp:
-                if resp.status_code == 416:
-                    total_size = downloaded_bytes
-                elif resp.status_code not in (200, 206):
-                    task.error_msg = f"HTTP {resp.status_code}"
-                    return False
-                else:
-                    content_length = resp.headers.get("content-length")
-                    if content_length:
-                        total_size = int(content_length) + (downloaded_bytes if resp.status_code == 206 else 0)
-                        task.total_bytes = total_size
+        candidate_urls = [url]
+        if task.platform == "github":
+            raw_target = url
+            for m in DEFAULT_GITHUB_ACCELERATORS:
+                if m != "不使用加速 (官方直连)" and raw_target.startswith(m):
+                    raw_target = raw_target[len(m):]
+                    break
+            for m in DEFAULT_GITHUB_ACCELERATORS:
+                if m != "不使用加速 (官方直连)":
+                    cand = m + raw_target
+                    if cand not in candidate_urls:
+                        candidate_urls.append(cand)
+            if raw_target not in candidate_urls:
+                candidate_urls.append(raw_target)
+
+        last_error = None
+        for try_idx, try_url in enumerate(candidate_urls):
+            if cancel_current_task or stop_queue_requested:
+                task.error_msg = "用户取消"
+                return False
+
+            if try_idx > 0:
+                log(f"     [自动故障转移] 尝试备用加速节点 ({try_idx+1}/{len(candidate_urls)}): {try_url[:60]}...")
+
+            try:
+                with requests.get(try_url, headers=req_headers, proxies=proxies, stream=True, timeout=25, verify=False, allow_redirects=True) as resp:
+                    if resp.status_code == 416:
+                        total_size = downloaded_bytes
+                    elif resp.status_code not in (200, 206):
+                        last_error = f"HTTP {resp.status_code}"
+                        continue
                     else:
-                        total_size = task.total_bytes
+                        content_length = resp.headers.get("content-length")
+                        if content_length:
+                            total_size = int(content_length) + (downloaded_bytes if resp.status_code == 206 else 0)
+                            task.total_bytes = total_size
+                        else:
+                            total_size = task.total_bytes
 
-                mode = "ab" if (resp.status_code == 206 and downloaded_bytes > 0) else "wb"
-                if mode == "wb":
-                    downloaded_bytes = 0
+                    mode = "ab" if (resp.status_code == 206 and downloaded_bytes > 0) else "wb"
+                    if mode == "wb":
+                        downloaded_bytes = 0
 
-                start_time = time.time()
-                last_update = start_time
-                bytes_since = 0
+                    start_time = time.time()
+                    last_update = start_time
+                    bytes_since = 0
 
-                with open(temp_path, mode) as f:
-                    for chunk in resp.iter_content(chunk_size=chunk_size):
-                        if cancel_current_task or stop_queue_requested:
-                            task.error_msg = "用户取消"
-                            return False
-                        if chunk:
-                            f.write(chunk)
-                            downloaded_bytes += len(chunk)
-                            bytes_since += len(chunk)
+                    with open(temp_path, mode) as f:
+                        for chunk in resp.iter_content(chunk_size=chunk_size):
+                            if cancel_current_task or stop_queue_requested:
+                                task.error_msg = "用户取消"
+                                return False
+                            if chunk:
+                                f.write(chunk)
+                                downloaded_bytes += len(chunk)
+                                bytes_since += len(chunk)
 
-                            now = time.time()
-                            if now - last_update >= 0.3:
-                                dt = now - last_update
-                                speed_bps = bytes_since / dt
-                                speed_str = format_size(int(speed_bps)) + "/s"
-                                
-                                if total_size and total_size > 0:
-                                    pct = min(100.0, (downloaded_bytes / total_size) * 100.0)
-                                    rem_bytes = max(0, total_size - downloaded_bytes)
-                                    eta_sec = int(rem_bytes / speed_bps) if speed_bps > 0 else 0
-                                    eta_str = f"{eta_sec // 60}分{eta_sec % 60}秒" if eta_sec > 60 else f"{eta_sec}秒"
-                                    
-                                    task.progress = pct
-                                    task.speed_str = speed_str
-                                    task.eta_str = eta_str
+                                now = time.time()
+                                if now - last_update >= 0.3:
+                                    dt = now - last_update
+                                    speed_bps = bytes_since / dt
+                                    speed_str = format_size(int(speed_bps)) + "/s"
 
-                                    pb_global.value = pct / 100.0
-                                    lbl_global_pct.value = f"进度: {pct:.1f}% ({format_size(downloaded_bytes)} / {format_size(total_size)})"
-                                    lbl_global_speed.value = f"速度: {speed_str} | 预估剩余: {eta_str}"
-                                    page.update()
+                                    if total_size and total_size > 0:
+                                        pct = min(100.0, (downloaded_bytes / total_size) * 100.0)
+                                        rem_bytes = max(0, total_size - downloaded_bytes)
+                                        eta_sec = int(rem_bytes / speed_bps) if speed_bps > 0 else 0
+                                        eta_str = f"{eta_sec // 60}分{eta_sec % 60}秒" if eta_sec > 60 else f"{eta_sec}秒"
 
-                                last_update = now
-                                bytes_since = 0
+                                        task.progress = pct
+                                        task.speed_str = speed_str
+                                        task.eta_str = eta_str
 
-            if os.path.exists(local_path):
-                os.remove(local_path)
-            os.rename(temp_path, local_path)
-            return True
+                                        pb_global.value = pct / 100.0
+                                        lbl_global_pct.value = f"进度: {pct:.1f}% ({format_size(downloaded_bytes)} / {format_size(total_size)})"
+                                        lbl_global_speed.value = f"速度: {speed_str} | 预估剩余: {eta_str}"
+                                        page.update()
 
-        except Exception as e:
-            task.error_msg = str(e)
-            return False
+                                    last_update = now
+                                    bytes_since = 0
+
+                if os.path.exists(local_path):
+                    os.remove(local_path)
+                os.rename(temp_path, local_path)
+                return True
+
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        task.error_msg = str(last_error)
+        return False
 
     # ------------------ Safe Deletion Dialog ------------------
     def delete_checked_tasks(e):
