@@ -1779,7 +1779,7 @@ class HFDownloaderApp(tk.Tk):
             dest_frame, 
             textvariable=self.preset_var, 
             values=self.preset_labels,
-            width=26,
+            width=36,
             state="readonly",
             font=FONT_BOLD
         )
@@ -2097,7 +2097,7 @@ class HFDownloaderApp(tk.Tk):
             textvariable=self.gh_preset_var, 
             values=preset_names, 
             state="readonly", 
-            width=26, 
+            width=36, 
             font=FONT_BOLD
         )
         gh_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=4, pady=3)
