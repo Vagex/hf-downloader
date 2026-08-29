@@ -2271,6 +2271,15 @@ def main(page: ft.Page):
                 ft.ElevatedButton("检测加速节点", icon=ft.Icons.BOLT, on_click=test_gh_node, height=38),
                 ft.Text("GitHub Token:", size=13, weight=ft.FontWeight.BOLD), tf_gh_token
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ], spacing=6),
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border_radius=8,
+        padding=10
+    )
+
+    gh_dest_container = ft.Container(
+        content=ft.Column([
+            ft.Text("💾 当前文件的保存目标目录 (默认开启扁平化保存：直接存入目标目录，不生成多层嵌套子文件夹)", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT),
             ft.Row([
                 ft.Text("分类预设:", size=13, weight=ft.FontWeight.BOLD), dd_gh_preset,
                 ft.Text("保存路径:", size=13, weight=ft.FontWeight.BOLD), tf_gh_dest,
@@ -2284,6 +2293,7 @@ def main(page: ft.Page):
 
     tab_github_view = ft.Column([
         top_gh_config_container,
+        gh_dest_container,
         ft.Container(
             content=ft.Row([
                 lbl_gh_current_scope,

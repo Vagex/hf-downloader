@@ -2033,35 +2033,52 @@ class HFDownloaderApp(tk.Tk):
         gh_token_entry.grid(row=1, column=3, columnspan=5, sticky=tk.EW, padx=4, pady=3)
         ToolTip(gh_token_entry, "可选。当遇到 GitHub API 速率限制 (Rate Limit) 时，可在此填入个人 GitHub Personal Access Token 提升配额")
 
-        # Row 2: ComfyUI Preset first, followed by Destination path & Flatten check (Symmetrical with HF layout)
-        ttk.Label(config_frame, text="常用预设分类:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=3)
+        config_frame.columnconfigure(1, weight=1)
+
+        # Target Directory Frame (Separate Panel identical to Hugging Face)
+        gh_dest_frame = ttk.LabelFrame(
+            pane_upper, 
+            text=" 💾 当前文件的保存目标目录 (默认开启扁平化保存：直接存入目标目录，不生成多层嵌套子文件夹) ", 
+            padding="6"
+        )
+        gh_dest_frame.pack(fill=tk.X, pady=(0, 2))
+
+        ttk.Label(gh_dest_frame, text="常用预设分类:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
         
         preset_names = list(PRESET_DIRS_MAP.keys())
         self.gh_preset_var = tk.StringVar(value=preset_names[0])
-        gh_preset_combo = ttk.Combobox(config_frame, textvariable=self.gh_preset_var, values=preset_names, state="readonly", font=FONT_BOLD)
-        gh_preset_combo.grid(row=2, column=1, sticky=tk.EW, padx=4, pady=3)
+        gh_preset_combo = ttk.Combobox(
+            gh_dest_frame, 
+            textvariable=self.gh_preset_var, 
+            values=preset_names, 
+            state="readonly", 
+            width=26, 
+            font=FONT_BOLD
+        )
+        gh_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=4, pady=3)
         gh_preset_combo.bind("<<ComboboxSelected>>", self._on_gh_preset_changed)
         ComboboxItemToolTip(gh_preset_combo, PRESET_DIRS_MAP)
 
-        ttk.Label(config_frame, text="完整路径:").grid(row=2, column=2, sticky=tk.W, padx=(8, 4), pady=3)
+        ttk.Label(gh_dest_frame, text="完整路径:").grid(row=0, column=2, sticky=tk.W, padx=(8, 4), pady=3)
         
-        dest_gh_subframe = ttk.Frame(config_frame)
-        dest_gh_subframe.grid(row=2, column=3, columnspan=4, sticky=tk.EW, padx=4, pady=3)
-
         self.gh_dest_path_var = tk.StringVar(value=DEFAULT_CUSTOM_NODES_DIR)
-        gh_dest_entry = ttk.Entry(dest_gh_subframe, textvariable=self.gh_dest_path_var, font=FONT_NORMAL)
-        gh_dest_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        gh_dest_entry = ttk.Entry(gh_dest_frame, textvariable=self.gh_dest_path_var, font=FONT_NORMAL)
+        gh_dest_entry.grid(row=0, column=3, sticky=tk.EW, padx=4, pady=3)
         ToolTip(gh_dest_entry, lambda: f"目标保存目录完整绝对路径:\n{self.gh_dest_path_var.get()}")
 
-        btn_browse_gh_dest = ttk.Button(dest_gh_subframe, text=" 浏览更改...", image=self.icons["folder"], compound=tk.LEFT, command=self._browse_gh_dest)
-        btn_browse_gh_dest.pack(side=tk.RIGHT, padx=(4, 0))
+        btn_browse_gh_dest = ttk.Button(gh_dest_frame, text=" 浏览更改...", image=self.icons["folder"], compound=tk.LEFT, command=self._browse_gh_dest)
+        btn_browse_gh_dest.grid(row=0, column=4, padx=4, pady=3)
 
         self.gh_flatten_var = tk.BooleanVar(value=True)
-        cb_gh_flatten = ttk.Checkbutton(config_frame, text="扁平化保存", variable=self.gh_flatten_var)
-        cb_gh_flatten.grid(row=2, column=7, sticky=tk.W, padx=(6, 4), pady=3)
+        cb_gh_flatten = ttk.Checkbutton(
+            gh_dest_frame, 
+            text="扁平化保存", 
+            variable=self.gh_flatten_var
+        )
+        cb_gh_flatten.grid(row=0, column=5, sticky=tk.W, padx=(6, 4), pady=3)
+        ToolTip(cb_gh_flatten, "勾选后将文件直接保存到目标目录，不创建多层子文件夹")
 
-        config_frame.columnconfigure(1, weight=1)
-        config_frame.columnconfigure(3, weight=1)
+        gh_dest_frame.columnconfigure(3, weight=1)
 
         # Lower Pane: Dual-pane Browser (Treeview on left, File/Asset list on right)
         pane_lower = ttk.Frame(self.gh_paned_v)
