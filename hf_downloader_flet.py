@@ -369,6 +369,7 @@ def main(page: ft.Page):
     proxies_list: List[str] = list(DEFAULT_PROXIES)
     saved_proxy: str = ""
     saved_token: str = ""
+    saved_gh_token: str = ""
     saved_theme_pref: str = "system"  # 'system', 'dark', 'light'
 
     # Load Settings
@@ -378,6 +379,7 @@ def main(page: ft.Page):
                 data = json.load(f)
                 saved_proxy = data.get("proxy", "")
                 saved_token = data.get("token", "")
+                saved_gh_token = data.get("gh_token", "")
                 saved_theme_pref = data.get("theme_mode", "system")
         except Exception:
             pass
@@ -444,14 +446,18 @@ def main(page: ft.Page):
         try:
             p_val = get_effective_proxy()
             t_val = tf_token.value.strip() if tf_token.value else ""
+            gh_t_val = tf_gh_token.value.strip() if 'tf_gh_token' in locals() and tf_gh_token.value else saved_gh_token
             with open(APP_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump({
                     "proxy": p_val,
                     "token": t_val,
+                    "gh_token": gh_t_val,
                     "theme_mode": current_theme_pref
                 }, f, ensure_ascii=False, indent=2)
             if t_val:
                 os.environ["HF_TOKEN"] = t_val
+            if gh_t_val:
+                os.environ["GITHUB_TOKEN"] = gh_t_val
         except Exception:
             pass
 
@@ -1817,7 +1823,19 @@ def main(page: ft.Page):
         options=[ft.dropdown.Option(m) for m in DEFAULT_GITHUB_ACCELERATORS],
         value=DEFAULT_GITHUB_ACCELERATORS[0], dense=True, text_size=12, expand=3, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4)
     )
-    tf_gh_token = ft.TextField(value="", label=None, password=True, can_reveal_password=True, dense=True, text_size=12, expand=2, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4))
+    tf_gh_token = ft.TextField(
+        value=saved_gh_token, 
+        label=None, 
+        password=True, 
+        can_reveal_password=True, 
+        dense=True, 
+        text_size=12, 
+        expand=2, 
+        height=38, 
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+        on_blur=lambda e: save_settings(),
+        on_change=lambda e: save_settings()
+    )
     
     def on_gh_preset_change(e):
         pname = dd_gh_preset.value

@@ -1445,25 +1445,31 @@ class HFDownloaderApp(tk.Tk):
     def _load_saved_settings(self):
         self.saved_proxy = ""
         self.saved_token = ""
+        self.saved_gh_token = ""
         if os.path.exists(APP_CONFIG_FILE):
             try:
                 with open(APP_CONFIG_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.saved_proxy = data.get("proxy", "")
                     self.saved_token = data.get("token", "")
+                    self.saved_gh_token = data.get("gh_token", "")
             except Exception:
                 pass
 
     def _save_settings(self):
         try:
             token_val = self.token_var.get().strip() if hasattr(self, "token_var") else self.saved_token
+            gh_token_val = self.gh_token_var.get().strip() if hasattr(self, "gh_token_var") else self.saved_gh_token
             with open(APP_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump({
                     "proxy": self._get_effective_proxy() if hasattr(self, "proxy_var") else self.saved_proxy,
-                    "token": token_val
+                    "token": token_val,
+                    "gh_token": gh_token_val
                 }, f, ensure_ascii=False, indent=2)
             if token_val:
                 os.environ["HF_TOKEN"] = token_val
+            if gh_token_val:
+                os.environ["GITHUB_TOKEN"] = gh_token_val
         except Exception:
             pass
 
@@ -1515,6 +1521,15 @@ class HFDownloaderApp(tk.Tk):
         else:
             self.token_entry.config(show="*")
             self.btn_toggle_token.config(text=" 显示", image=self.icons["eye_open"], compound=tk.LEFT)
+
+    def _toggle_gh_token_visibility(self):
+        self.gh_token_show_state = not self.gh_token_show_state
+        if self.gh_token_show_state:
+            self.gh_token_entry.config(show="")
+            self.btn_toggle_gh_token.config(text=" 隐藏", image=self.icons["eye_lock"], compound=tk.LEFT)
+        else:
+            self.gh_token_entry.config(show="*")
+            self.btn_toggle_gh_token.config(text=" 显示", image=self.icons["eye_open"], compound=tk.LEFT)
 
     def open_mirror_manager(self):
         MirrorManagerDialog(self, self.mirrors_list, self._on_mirrors_updated)
@@ -2030,10 +2045,21 @@ class HFDownloaderApp(tk.Tk):
         btn_test_gh_node.pack(side=tk.RIGHT, padx=(4, 0))
 
         ttk.Label(config_frame, text="GitHub Token:").grid(row=1, column=2, sticky=tk.W, padx=4, pady=3)
-        self.gh_token_var = tk.StringVar(value="")
-        gh_token_entry = ttk.Entry(config_frame, textvariable=self.gh_token_var, show="*", font=FONT_NORMAL)
-        gh_token_entry.grid(row=1, column=3, columnspan=5, sticky=tk.EW, padx=4, pady=3)
-        ToolTip(gh_token_entry, "可选。当遇到 GitHub API 速率限制 (Rate Limit) 时，可在此填入个人 GitHub Personal Access Token 提升配额")
+        
+        gh_token_subframe = ttk.Frame(config_frame)
+        gh_token_subframe.grid(row=1, column=3, columnspan=5, sticky=tk.EW, padx=4, pady=3)
+
+        self.gh_token_var = tk.StringVar(value=self.saved_gh_token)
+        self.gh_token_show_state = False
+        self.gh_token_entry = ttk.Entry(gh_token_subframe, textvariable=self.gh_token_var, show="*", font=FONT_NORMAL)
+        self.gh_token_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.gh_token_entry.bind("<FocusOut>", lambda e: self._save_settings())
+        self.gh_token_entry.bind("<KeyRelease>", lambda e: self._save_settings())
+
+        self.btn_toggle_gh_token = ttk.Button(gh_token_subframe, text=" 显示", image=self.icons["eye_open"], compound=tk.LEFT, width=7, command=self._toggle_gh_token_visibility)
+        self.btn_toggle_gh_token.pack(side=tk.RIGHT, padx=(4, 0))
+
+        ToolTip(self.gh_token_entry, "可选。当遇到 GitHub API 速率限制 (Rate Limit) 时，可在此填入个人 GitHub Personal Access Token 提升配额，输入后自动永久保存")
 
         # Row 2: Proxy settings & management (Identical to Hugging Face)
         ttk.Label(config_frame, text="网络代理 (Proxy):").grid(row=2, column=0, sticky=tk.W, padx=4, pady=3)
