@@ -1201,6 +1201,164 @@ class PresetDirectoryManagerDialog(tk.Toplevel):
         super().destroy()
 
 
+# ------------------ Twitter Video & Thumbnail Visual Preview Dialog ------------------
+class TwitterPreviewDialog(tk.Toplevel):
+    """Visual Dialog for previewing Twitter video thumbnail and streaming the MP4 video directly."""
+
+    def __init__(self, parent, tweet_data: Dict[str, Any], variant_index: int = 0, proxy: Optional[str] = None):
+        super().__init__(parent)
+        self.tweet_data = tweet_data
+        self.proxy = proxy
+        variants = tweet_data.get("variants", [])
+        self.current_variant = variants[variant_index] if 0 <= variant_index < len(variants) else (variants[0] if variants else {})
+        
+        self.title("🎬 Twitter / X 视频与封面在线预览 (Video & Thumbnail Preview)")
+        self.geometry("780x560")
+        self.minsize(680, 480)
+        self.transient(parent)
+        self.grab_set()
+
+        self.thumbnail_img = None
+        center_window_on_parent(self, parent, 780, 560)
+        self._build_ui()
+        self._load_thumbnail_async()
+
+    def _build_ui(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Top Meta Header
+        top_frame = ttk.Frame(main_frame)
+        top_frame.pack(fill=tk.X, pady=(0, 6))
+
+        author = self.tweet_data.get("author", "Twitter 用户")
+        author_id = self.tweet_data.get("author_id", "")
+        pub_date = self.tweet_data.get("date", "--")
+        q_label = self.current_variant.get("quality", "标准 MP4")
+        sz = self.current_variant.get("size_str", "--")
+        br = self.current_variant.get("bitrate_str", "--")
+
+        lbl_title = ttk.Label(top_frame, text=f"👤 {author} ({author_id})  |  {q_label}  |  文件大小: {sz} (码率: {br})", font=FONT_BOLD, foreground="#0d6efd")
+        lbl_title.pack(anchor=tk.W, pady=(0, 2))
+
+        lbl_sub = ttk.Label(top_frame, text=f"🕒 发布时间: {pub_date}  |  时长: {self.tweet_data.get('duration', '--')}", font=FONT_SMALL, foreground="#555555")
+        lbl_sub.pack(anchor=tk.W, pady=(0, 4))
+
+        # Tweet text display
+        text_box = tk.Text(top_frame, height=2, font=FONT_NORMAL, bg="#f8fafc", fg="#1e293b", wrap=tk.WORD, relief=tk.SOLID, bd=1)
+        text_box.insert("1.0", self.tweet_data.get("text", "(无推文文本)"))
+        text_box.config(state=tk.DISABLED)
+        text_box.pack(fill=tk.X)
+
+        # 2. Middle Thumbnail Canvas / Image Box
+        img_frame = ttk.LabelFrame(main_frame, text=" 🖼️ 视频封面与高清缩略图预览 (可双击放大) ", padding="6")
+        img_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 8))
+
+        self.lbl_image = ttk.Label(img_frame, text="正在通过网络加载视频高清封面...", anchor=tk.CENTER, justify=tk.CENTER, font=FONT_NORMAL)
+        self.lbl_image.pack(fill=tk.BOTH, expand=True)
+        self.lbl_image.bind("<Double-1>", lambda e: self.play_with_system_player())
+
+        # 3. Direct URL Box
+        url_frame = ttk.Frame(main_frame)
+        url_frame.pack(fill=tk.X, pady=(0, 6))
+
+        ttk.Label(url_frame, text="直链地址:").pack(side=tk.LEFT, padx=(0, 4))
+        self.direct_url = self.current_variant.get("url", "")
+        entry_url = ttk.Entry(url_frame, font=FONT_NORMAL)
+        entry_url.insert(0, self.direct_url)
+        entry_url.config(state="readonly")
+        entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+
+        btn_copy_url = ttk.Button(url_frame, text="📋 复制直链", command=self._copy_url)
+        btn_copy_url.pack(side=tk.RIGHT)
+
+        # 4. Action Buttons Toolbar
+        action_bar = ttk.Frame(main_frame)
+        action_bar.pack(fill=tk.X)
+
+        btn_play_system = tk.Button(
+            action_bar,
+            text="▶️ 立即在线播放视频 (调用系统播放器)",
+            font=FONT_BOLD,
+            bg="#198754",
+            fg="#ffffff",
+            activebackground="#157347",
+            activeforeground="#ffffff",
+            padx=12, pady=4,
+            command=self.play_with_system_player
+        )
+        btn_play_system.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_play_browser = tk.Button(
+            action_bar,
+            text="🌐 在浏览器中在线播放",
+            font=FONT_BOLD,
+            bg="#0d6efd",
+            fg="#ffffff",
+            activebackground="#0b5ed7",
+            activeforeground="#ffffff",
+            padx=10, pady=4,
+            command=self.open_in_browser
+        )
+        btn_play_browser.pack(side=tk.LEFT, padx=4)
+
+        btn_close = ttk.Button(action_bar, text="关闭预览", command=self.destroy)
+        btn_close.pack(side=tk.RIGHT)
+
+    def _copy_url(self):
+        if self.direct_url:
+            self.clipboard_clear()
+            self.clipboard_append(self.direct_url)
+            messagebox.showinfo("复制成功", "已将视频 MP4 直链复制到剪贴板！", parent=self)
+
+    def play_with_system_player(self):
+        if not self.direct_url:
+            return
+        import webbrowser
+        try:
+            if sys.platform == "win32":
+                os.startfile(self.direct_url)
+            else:
+                webbrowser.open(self.direct_url)
+        except Exception:
+            webbrowser.open(self.direct_url)
+
+    def open_in_browser(self):
+        if not self.direct_url:
+            return
+        import webbrowser
+        webbrowser.open(self.direct_url)
+
+    def _load_thumbnail_async(self):
+        thumb_url = self.tweet_data.get("thumbnail")
+        if not thumb_url:
+            self.lbl_image.config(text="该推文未提供视频封面缩略图")
+            return
+
+        def _fetch():
+            try:
+                proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                resp = requests.get(thumb_url, headers=headers, proxies=proxies, timeout=12)
+                if resp.status_code == 200:
+                    import io
+                    img_data = io.BytesIO(resp.content)
+                    pil_img = Image.open(img_data)
+                    pil_img.thumbnail((620, 320), Image.Resampling.LANCZOS)
+                    tk_img = ImageTk.PhotoImage(pil_img)
+                    self.after(0, lambda img=tk_img: self._set_image(img))
+                else:
+                    self.after(0, lambda: self.lbl_image.config(text="无法加载视频封面 (网络请求失败)"))
+            except Exception as err:
+                self.after(0, lambda e=err: self.lbl_image.config(text=f"封面加载失败: {str(e)}"))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _set_image(self, tk_img):
+        self.thumbnail_img = tk_img
+        self.lbl_image.config(image=tk_img, text="")
+
+
 # ------------------ History & Starred Repository Database ------------------
 class HistoryManager:
     """Lightweight persistent JSON database manager for Hugging Face and GitHub repository access history."""
@@ -1868,6 +2026,7 @@ class TwitterMediaResolver:
                                     "filename": clean_fn
                                 })
 
+                    syn_thumb = media_list[0].get("media_url_https") if media_list else None
                     variants_list.sort(key=lambda x: x["bitrate"], reverse=True)
                     if variants_list:
                         return {
@@ -1877,7 +2036,7 @@ class TwitterMediaResolver:
                             "text": text,
                             "date": pub_date,
                             "duration": "--",
-                            "thumbnail": None,
+                            "thumbnail": syn_thumb,
                             "variants": variants_list
                         }
             except Exception as e_syn:
@@ -3534,18 +3693,41 @@ class HFDownloaderApp(tk.Tk):
 
         tw_dest_frame.columnconfigure(3, weight=1)
 
-        # Panel 3: Tweet & Video Meta Summary Card
-        self.tw_meta_frame = ttk.LabelFrame(tw_upper, text=" 📝 推文与视频信息摘要 ", padding="6")
+        # Panel 3: Tweet & Video Meta Summary Card with Embedded Thumbnail Card
+        self.tw_meta_frame = ttk.LabelFrame(tw_upper, text=" 📝 推文与视频信息摘要 (包含高清缩略图与在线预览) ", padding="6")
         self.tw_meta_frame.pack(fill=tk.X, pady=(0, 4))
 
-        self.lbl_tw_author = ttk.Label(self.tw_meta_frame, text="推文作者: --", font=FONT_BOLD, foreground="#0d6efd")
+        meta_container = ttk.Frame(self.tw_meta_frame)
+        meta_container.pack(fill=tk.X, expand=True)
+
+        meta_left = ttk.Frame(meta_container)
+        meta_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        self.lbl_tw_author = ttk.Label(meta_left, text="推文作者: --", font=FONT_BOLD, foreground="#0d6efd")
         self.lbl_tw_author.pack(anchor=tk.W, pady=(0, 2))
 
-        self.lbl_tw_date = ttk.Label(self.tw_meta_frame, text="发布日期: -- | 视频时长: --", font=FONT_SMALL, foreground="#555555")
+        self.lbl_tw_date = ttk.Label(meta_left, text="发布日期: -- | 视频时长: --", font=FONT_SMALL, foreground="#555555")
         self.lbl_tw_date.pack(anchor=tk.W, pady=(0, 2))
 
-        self.lbl_tw_text = ttk.Label(self.tw_meta_frame, text="推文内容: (请在上方面板输入推文链接并点击【开始解析视频】)", font=FONT_NORMAL, wraplength=950, justify=tk.LEFT)
+        self.lbl_tw_text = ttk.Label(meta_left, text="推文内容: (请在上方面板输入推文链接并点击【开始解析视频】)", font=FONT_NORMAL, wraplength=760, justify=tk.LEFT)
         self.lbl_tw_text.pack(anchor=tk.W)
+
+        # Right: Video Thumbnail Card
+        meta_right = ttk.LabelFrame(meta_container, text=" 🖼️ 视频封面 ", padding="2")
+        meta_right.pack(side=tk.RIGHT, padx=2)
+
+        self.lbl_tw_thumb = ttk.Label(
+            meta_right, 
+            text=" 📹 视频封面 \n(解析后显示)", 
+            justify=tk.CENTER, 
+            anchor=tk.CENTER, 
+            width=18, 
+            font=FONT_SMALL, 
+            cursor="hand2"
+        )
+        self.lbl_tw_thumb.pack(padx=4, pady=4)
+        self.lbl_tw_thumb.bind("<Button-1>", lambda e: self.preview_twitter_video())
+        ToolTip(self.lbl_tw_thumb, "点击放大查看高清视频封面并可在线预览播放")
 
         # Lower Area: Video Quality Variants Table & Operations
         tw_lower = ttk.Frame(self.tw_paned_v)
@@ -3563,6 +3745,9 @@ class HFDownloaderApp(tk.Tk):
         btn_tw_uncheck_all = ttk.Button(tw_toolbar, text=" 清空勾选", image=self.icons["clean"], compound=tk.LEFT, command=self.uncheck_all_tw_variants)
         btn_tw_uncheck_all.pack(side=tk.LEFT, padx=2)
 
+        btn_tw_preview = ttk.Button(tw_toolbar, text=" 🎬 在线预览播放", image=self.icons["play"], compound=tk.LEFT, command=self.preview_twitter_video)
+        btn_tw_preview.pack(side=tk.LEFT, padx=4)
+
         btn_tw_open_folder = ttk.Button(tw_toolbar, text=" 打开保存目录", image=self.icons["folder"], compound=tk.LEFT, command=lambda: self._open_folder(self.tw_dest_path_var.get()))
         btn_tw_open_folder.pack(side=tk.RIGHT, padx=2)
 
@@ -3577,7 +3762,7 @@ class HFDownloaderApp(tk.Tk):
         self.tree_tw_variants.heading("quality", text="清晰度 / 画质规格", anchor=tk.W)
         self.tree_tw_variants.heading("bitrate", text="视频码率", anchor=tk.CENTER)
         self.tree_tw_variants.heading("size", text="预估文件大小", anchor=tk.CENTER)
-        self.tree_tw_variants.heading("filename", text="下载文件名 / 目标名称", anchor=tk.W)
+        self.tree_tw_variants.heading("filename", text="下载文件名 / 目标名称 (双击在线预览播放)", anchor=tk.W)
 
         self.tree_tw_variants.column("chk", width=55, minwidth=50, stretch=False, anchor=tk.CENTER)
         self.tree_tw_variants.column("quality", width=220, minwidth=160, stretch=False, anchor=tk.W)
@@ -3596,7 +3781,8 @@ class HFDownloaderApp(tk.Tk):
 
         self.tree_tw_variants.bind("<Button-1>", self._on_tw_tree_click)
         self.tree_tw_variants.bind("<space>", self._on_tw_tree_space)
-        self.tree_tw_variants.bind("<Double-1>", lambda e: self.add_twitter_to_queue(jump=False))
+        self.tree_tw_variants.bind("<Double-1>", lambda e: self.preview_twitter_video())
+        self.tree_tw_variants.bind("<Button-3>", self._show_tw_context_menu)
 
         # Bottom Actions Bar of Tab 3
         tw_act_frame = ttk.Frame(self.tab_twitter)
@@ -3671,6 +3857,7 @@ class HFDownloaderApp(tk.Tk):
             self.after(0, lambda: self.lbl_tw_author.config(text="推文作者: 解析未成功", foreground="#dc3545"))
             self.after(0, lambda: self.lbl_tw_date.config(text="发布日期: -- | 视频时长: --", foreground="#555555"))
             self.after(0, lambda: self.lbl_tw_text.config(text=f"推文内容: ❌ 无法解析视频: {err_str}\n\n💡 提示: 请确认推文链接是否有效，或确认是否已开启网络代理 (如 Clash/v2rayN)。", foreground="#dc3545"))
+            self.after(0, lambda: self.lbl_tw_thumb.config(image="", text=" 📹 视频封面 \n(解析失败)", width=18))
             self.after(0, lambda: self.tree_tw_variants.delete(*self.tree_tw_variants.get_children()))
             self.after(0, lambda: self.checked_tw_variants.clear())
             self.after(0, lambda: self._update_tw_checked_count_label())
@@ -3688,6 +3875,9 @@ class HFDownloaderApp(tk.Tk):
         self.lbl_tw_author.config(text=f"推文作者: {data.get('author')} ({data.get('author_id')})", foreground="#0d6efd")
         self.lbl_tw_date.config(text=f"发布日期: {data.get('date')} | 视频时长: {data.get('duration')}", foreground="#555555")
         self.lbl_tw_text.config(text=f"推文内容: {data.get('text')}", foreground="#212529")
+
+        # Load Thumbnail asynchronously for the meta card
+        self._load_twitter_thumbnail_async(data.get("thumbnail"))
 
         self.tree_tw_variants.delete(*self.tree_tw_variants.get_children())
         self.checked_tw_variants.clear()
@@ -3707,6 +3897,69 @@ class HFDownloaderApp(tk.Tk):
             )
 
         self._update_tw_checked_count_label()
+
+    def _load_twitter_thumbnail_async(self, thumb_url: Optional[str]):
+        if not thumb_url:
+            self.lbl_tw_thumb.config(image="", text=" 📹 暂无封面缩略图 ", width=18)
+            return
+
+        self.lbl_tw_thumb.config(image="", text=" ⏳ 封面加载中... ", width=18)
+        proxy = self._get_effective_proxy()
+
+        def _fetch():
+            try:
+                proxies = {"http": proxy, "https": proxy} if proxy else None
+                headers = {"User-Agent": "Mozilla/5.0"}
+                resp = requests.get(thumb_url, headers=headers, proxies=proxies, timeout=10)
+                if resp.status_code == 200:
+                    import io
+                    img_data = io.BytesIO(resp.content)
+                    pil_img = Image.open(img_data)
+                    pil_img.thumbnail((160, 95), Image.Resampling.LANCZOS)
+                    tk_img = ImageTk.PhotoImage(pil_img)
+                    self.after(0, lambda img=tk_img: self._set_tw_thumb(img))
+                else:
+                    self.after(0, lambda: self.lbl_tw_thumb.config(image="", text=" ❌ 封面加载失败 ", width=18))
+            except Exception:
+                self.after(0, lambda: self.lbl_tw_thumb.config(image="", text=" 📹 点击在线预览 ", width=18))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _set_tw_thumb(self, tk_img):
+        self.tw_card_thumb_img = tk_img
+        self.lbl_tw_thumb.config(image=tk_img, text="", width=0)
+
+    def preview_twitter_video(self):
+        if not self.tw_resolved_data or not self.tw_resolved_data.get("variants"):
+            messagebox.showwarning("提示", "请先解析有效的推文视频后再查看效果！", parent=self)
+            return
+
+        sel = self.tree_tw_variants.selection()
+        idx = 0
+        if sel and sel[0].isdigit():
+            idx = int(sel[0])
+
+        TwitterPreviewDialog(self, self.tw_resolved_data, variant_index=idx, proxy=self._get_effective_proxy())
+
+    def _show_tw_context_menu(self, event):
+        if not self.tw_resolved_data:
+            return
+        item_id = self.tree_tw_variants.identify_row(event.y)
+        if item_id and item_id.isdigit():
+            self.tree_tw_variants.selection_set(item_id)
+            idx = int(item_id)
+            variants = self.tw_resolved_data.get("variants", [])
+            if 0 <= idx < len(variants):
+                v = variants[idx]
+                v_url = v.get("url", "")
+
+                menu = tk.Menu(self, tearoff=0)
+                menu.add_command(label="🎬 在线预览播放该画质视频", command=self.preview_twitter_video)
+                menu.add_command(label="🌐 在浏览器中打开播放直链", command=lambda: os.startfile(v_url) if sys.platform == "win32" else None)
+                menu.add_command(label="📋 复制该画质下载直链", command=lambda: (self.clipboard_clear(), self.clipboard_append(v_url), messagebox.showinfo("提示", "已复制直链到剪贴板！", parent=self)))
+                menu.add_separator()
+                menu.add_command(label="📥 将当前规格加入统一下载队列", command=lambda: self.add_twitter_to_queue(jump=False))
+                menu.post(event.x_root, event.y_root)
 
     def _on_tw_tree_click(self, event):
         region = self.tree_tw_variants.identify("region", event.x, event.y)

@@ -2760,6 +2760,7 @@ def main(page: ft.Page):
     lbl_tw_date = ft.Text("发布日期: -- | 视频时长: --", size=12, color=ft.Colors.GREY_600)
     lbl_tw_text = ft.Text("推文内容: (请在上方面板输入推文链接并点击【开始解析视频】)", size=12)
     lbl_tw_checked = ft.Text("[已勾选: 0 项规格]", weight=ft.FontWeight.BOLD, color=COLOR_SUCCESS, size=13)
+    img_tw_thumb = ft.Image(src="", width=150, height=90, fit=ft.ImageFit.COVER, border_radius=ft.BorderRadius(6, 6, 6, 6), visible=False)
 
     col_tw_variants = ft.ListView(expand=True, spacing=4)
     raw_tw_data = None
@@ -2782,7 +2783,7 @@ def main(page: ft.Page):
                     ft.Text("视频码率", width=110, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
                     ft.Text("预估大小", width=110, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
                     ft.Text("目标文件名", expand=True, weight=ft.FontWeight.BOLD, size=12),
-                    ft.Text("操作", width=65, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("在线预览与操作", width=110, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
                 ]),
                 border_radius=4,
                 padding=ft.Padding.symmetric(horizontal=8, vertical=6)
@@ -2817,12 +2818,21 @@ def main(page: ft.Page):
                         ft.Text(v["bitrate_str"], width=110, text_align=ft.TextAlign.CENTER, size=12),
                         ft.Text(v["size_str"], width=110, text_align=ft.TextAlign.CENTER, size=12, color=COLOR_SUCCESS, weight=ft.FontWeight.BOLD),
                         ft.Text(v["filename"], expand=True, size=12),
-                        ft.IconButton(
-                            icon=ft.Icons.DOWNLOAD,
-                            icon_size=16,
-                            tooltip="加入队列并立即下载",
-                            on_click=lambda e, i=idx: make_quick_dl_single(i)
-                        )
+                        ft.Row([
+                            ft.IconButton(
+                                icon=ft.Icons.PLAY_CIRCLE_FILL,
+                                icon_color=COLOR_ACCENT,
+                                icon_size=18,
+                                tooltip="在线预览播放视频",
+                                on_click=lambda e, u=v["url"]: page.launch_url(u)
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.DOWNLOAD,
+                                icon_size=18,
+                                tooltip="加入队列并立即下载",
+                                on_click=lambda e, i=idx: make_quick_dl_single(i)
+                            ),
+                        ], width=110, alignment=ft.MainAxisAlignment.CENTER, spacing=0)
                     ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     border=ft.Border.all(1, COLOR_ACCENT if is_chk else ft.Colors.TRANSPARENT),
                     border_radius=4,
@@ -2843,6 +2853,7 @@ def main(page: ft.Page):
         lbl_tw_author.value = "推文作者: 正在连接网络并解析推文信息..."
         lbl_tw_date.value = "发布日期: 解析中... | 视频时长: 解析中..."
         lbl_tw_text.value = f"推文内容: 正在解析目标推文视频流直链与清晰度规格 ({raw_url})..."
+        img_tw_thumb.visible = False
         log(f"\n[*] 正在解析推文: {raw_url}...")
         page.update()
 
@@ -2860,6 +2871,12 @@ def main(page: ft.Page):
                 lbl_tw_date.value = f"发布日期: {res.get('date')} | 视频时长: {res.get('duration')}"
                 lbl_tw_text.value = f"推文内容: {res.get('text')}"
                 lbl_tw_checked.value = f"[已勾选: {len(checked_tw_indices)} 项规格]"
+                
+                if res.get("thumbnail"):
+                    img_tw_thumb.src = res.get("thumbnail")
+                    img_tw_thumb.visible = True
+                else:
+                    img_tw_thumb.visible = False
 
                 HistoryManager.record_access(f"@{res.get('author_id', '')} / {res.get('tweet_id')}", "twitter", "video", "main", len(res.get("variants", [])))
                 log(f"[✓] 成功解析到 {len(res.get('variants', []))} 个画质规格！作者: {res.get('author')} ({res.get('author_id')})")
@@ -2873,6 +2890,7 @@ def main(page: ft.Page):
                 lbl_tw_date.value = "发布日期: -- | 视频时长: --"
                 lbl_tw_text.value = f"推文内容: ❌ 无法解析视频: {str(err)}\n\n💡 提示: 请确认推文链接是否有效，或确认是否已开启网络代理 (如 Clash/v2rayN)。"
                 lbl_tw_checked.value = "[已勾选: 0 项规格]"
+                img_tw_thumb.visible = False
                 refresh_tw_variants_view()
                 log(f"[✗] 解析 Twitter 视频失败: {str(err)}")
                 show_snack(f"解析失败: {str(err)}", is_error=True)
@@ -2982,11 +3000,14 @@ def main(page: ft.Page):
     )
 
     tw_meta_container = ft.Container(
-        content=ft.Column([
-            lbl_tw_author,
-            lbl_tw_date,
-            lbl_tw_text
-        ], spacing=3),
+        content=ft.Row([
+            ft.Column([
+                lbl_tw_author,
+                lbl_tw_date,
+                lbl_tw_text
+            ], spacing=3, expand=True),
+            img_tw_thumb
+        ], vertical_alignment=ft.CrossAxisAlignment.START, spacing=8),
         border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
         border_radius=8,
         padding=10
