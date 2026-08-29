@@ -2447,9 +2447,24 @@ class HFDownloaderApp(tk.Tk):
             self._update_gh_checkbox_display(iid)
         self._update_gh_checked_count_label()
 
+    def _get_next_task_id(self) -> int:
+        if self.tasks:
+            tid = max(t.task_id for t in self.tasks) + 1
+        else:
+            tid = self.task_counter
+        self.task_counter = tid + 1
+        return tid
+
     def add_github_to_queue(self, jump: bool = False):
-        if not self.checked_gh_items:
-            messagebox.showwarning("提示", "请先在右侧列表中勾选需要下载的 GitHub 文件或资源！")
+        target_keys = list(self.checked_gh_items)
+        if not target_keys:
+            # Fallback to visually selected rows if checkboxes weren't clicked
+            sel_iids = self.tree_gh_files.selection()
+            if sel_iids:
+                target_keys = list(sel_iids)
+
+        if not target_keys:
+            messagebox.showwarning("提示", "请先在右侧列表中勾选或鼠标选择需要下载的 GitHub 文件或资源！")
             return
 
         dest_dir = self.gh_dest_path_var.get().strip()
@@ -2464,7 +2479,7 @@ class HFDownloaderApp(tk.Tk):
         flatten = self.gh_flatten_var.get()
 
         added_cnt = 0
-        for key in list(self.checked_gh_items):
+        for key in target_keys:
             item = self.raw_gh_items.get(key)
             if not item:
                 continue
@@ -2498,15 +2513,18 @@ class HFDownloaderApp(tk.Tk):
                 platform="github",
                 direct_url=accel_url
             )
+            task.check_local_status()
             self.tasks.append(task)
             added_cnt += 1
 
+        self._save_tasks()
         self.rescan_all_tasks(silent=True)
-        self.log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入下载队列！")
+        self._refresh_queue_tree()
+        self.log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
         messagebox.showinfo("入队成功", f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
 
-        if jump:
-            self.notebook.select(2)  # Switch to Queue tab
+        if jump or True:  # Jump to queue tab to show user the newly added tasks immediately
+            self.notebook.select(2)
 
     def download_github_repo_zip(self):
         repo_id = self.gh_repo_var.get().strip()
@@ -2542,8 +2560,11 @@ class HFDownloaderApp(tk.Tk):
             platform="github",
             direct_url=accel_url
         )
+        task.check_local_status()
         self.tasks.append(task)
+        self._save_tasks()
         self.rescan_all_tasks(silent=True)
+        self._refresh_queue_tree()
         self.log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name}")
         messagebox.showinfo("入队成功", f"已将 GitHub 整包源码 Zip 任务加入队列:\n{zip_name}\n保存到: {dest_dir}")
         self.notebook.select(2)
