@@ -1237,11 +1237,11 @@ class HFDownloaderApp(tk.Tk):
         self.browse_pane_upper = ttk.Frame(self.browse_paned_v)
         self.browse_paned_v.add(self.browse_pane_upper, weight=1)
 
-        config_frame = ttk.LabelFrame(self.browse_pane_upper, text=" ⚙️ 仓库与网络配置 ", padding="6")
+        config_frame = ttk.LabelFrame(self.browse_pane_upper, text=" 🤗 Hugging Face 仓库、模型与网络加速配置 ", padding="6")
         config_frame.pack(fill=tk.X, pady=(0, 4))
 
         # Row 0: Repo ID, Type, Branch, Fetch button, Env button
-        ttk.Label(config_frame, text="Repo ID (仓库名):").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
+        ttk.Label(config_frame, text="HF 仓库 (Repo ID):").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
         self.repo_id_var = tk.StringVar(value="Kijai/MiniMax-H3-experimental")
         repo_entry = ttk.Entry(config_frame, textvariable=self.repo_id_var, width=32, font=FONT_NORMAL)
         repo_entry.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
@@ -1366,7 +1366,7 @@ class HFDownloaderApp(tk.Tk):
         self.explorer_paned_h.pack(fill=tk.BOTH, expand=True)
 
         # 1. Left Directory Pane
-        left_dir_pane = ttk.LabelFrame(self.explorer_paned_h, text=" 📁 目录层级导航 ", padding="6")
+        left_dir_pane = ttk.LabelFrame(self.explorer_paned_h, text=" 📁 模型目录层级导航 ", padding="6")
         self.explorer_paned_h.add(left_dir_pane, weight=1)
 
         dir_tool_bar = ttk.Frame(left_dir_pane)
@@ -1396,7 +1396,7 @@ class HFDownloaderApp(tk.Tk):
         self.tree_dirs.bind("<<TreeviewSelect>>", self._on_dir_selected)
 
         # 2. Right File Details Pane with Checkboxes
-        right_file_pane = ttk.LabelFrame(self.explorer_paned_h, text=" 📄 文件明细列表 (点击方框勾选) ", padding="6")
+        right_file_pane = ttk.LabelFrame(self.explorer_paned_h, text=" 📄 模型文件挑拣列表 (点击整行切换勾选) ", padding="6")
         self.explorer_paned_h.add(right_file_pane, weight=3)
 
         file_tool_bar = ttk.Frame(right_file_pane)

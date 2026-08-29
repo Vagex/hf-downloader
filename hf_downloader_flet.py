@@ -1287,23 +1287,24 @@ def main(page: ft.Page):
     # Assemble Top Configuration Card (Strict 36px Height Grid)
     top_config_container = ft.Container(
         content=ft.Column([
+            ft.Text("🤗 Hugging Face 仓库、模型与网络加速配置", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT),
             ft.Row([
-                ft.Text("仓库:", size=13, weight=ft.FontWeight.BOLD), tf_repo,
+                ft.Text("HF 仓库:", size=13, weight=ft.FontWeight.BOLD), tf_repo,
                 ft.Text("类型:", size=13, weight=ft.FontWeight.BOLD), dd_type,
                 ft.Text("分支:", size=13, weight=ft.FontWeight.BOLD), tf_branch,
                 btn_fetch
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
-                ft.Text("镜像:", size=13, weight=ft.FontWeight.BOLD), dd_mirror,
-                ft.Text("Token:", size=13, weight=ft.FontWeight.BOLD), tf_token
+                ft.Text("镜像加速:", size=13, weight=ft.FontWeight.BOLD), dd_mirror,
+                ft.Text("HF Token:", size=13, weight=ft.FontWeight.BOLD), tf_token
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
-                ft.Text("代理:", size=13, weight=ft.FontWeight.BOLD), dd_proxy,
+                ft.Text("网络代理:", size=13, weight=ft.FontWeight.BOLD), dd_proxy,
                 ft.ElevatedButton("检测代理连通性", icon=ft.Icons.BOLT, on_click=test_proxy, height=38)
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
-                ft.Text("预设:", size=13, weight=ft.FontWeight.BOLD), dd_preset,
-                ft.Text("路径:", size=13, weight=ft.FontWeight.BOLD), tf_dest_path,
+                ft.Text("分类预设:", size=13, weight=ft.FontWeight.BOLD), dd_preset,
+                ft.Text("保存路径:", size=13, weight=ft.FontWeight.BOLD), tf_dest_path,
                 cb_flatten
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], spacing=6),
@@ -1896,8 +1897,9 @@ def main(page: ft.Page):
     # Top Configuration Card for GitHub (Strict 38px Grid)
     top_gh_config_container = ft.Container(
         content=ft.Column([
+            ft.Text("🐙 GitHub 仓库、Release与网络加速配置", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT),
             ft.Row([
-                ft.Text("仓库:", size=13, weight=ft.FontWeight.BOLD), tf_gh_repo,
+                ft.Text("GitHub 仓库:", size=13, weight=ft.FontWeight.BOLD), tf_gh_repo,
                 ft.Text("模式:", size=13, weight=ft.FontWeight.BOLD), dd_gh_mode,
                 ft.Text("分支/Tag:", size=13, weight=ft.FontWeight.BOLD), tf_gh_branch,
                 btn_gh_fetch
