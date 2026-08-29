@@ -1193,6 +1193,13 @@ class PresetDirectoryManagerDialog(tk.Toplevel):
             self.tree.selection_set(str(new_idx))
             self.on_update_callback(self.presets)
 
+    def destroy(self):
+        try:
+            self.on_update_callback(self.presets)
+        except Exception:
+            pass
+        super().destroy()
+
 
 # ------------------ History & Starred Repository Database ------------------
 class HistoryManager:
@@ -2209,10 +2216,11 @@ class HFDownloaderApp(tk.Tk):
         global PRESET_DIRS_MAP
         PRESET_DIRS_MAP = new_presets
         labels = list(new_presets.keys())
+        self.preset_labels = labels
         
         # 1. Update Tab 1 (Hugging Face)
         if hasattr(self, "preset_combo"):
-            self.preset_combo["values"] = labels
+            self.preset_combo.configure(values=labels)
             ComboboxItemToolTip(self.preset_combo, PRESET_DIRS_MAP)
             if selected_label and selected_label in new_presets:
                 self.preset_var.set(selected_label)
@@ -2220,10 +2228,12 @@ class HFDownloaderApp(tk.Tk):
             elif self.preset_var.get() not in new_presets and labels:
                 self.preset_var.set(labels[0])
                 self.dest_dir_var.set(new_presets[labels[0]])
+            elif self.preset_var.get() in new_presets:
+                self.dest_dir_var.set(new_presets[self.preset_var.get()])
 
         # 2. Update Tab 2 (GitHub)
         if hasattr(self, "gh_preset_combo"):
-            self.gh_preset_combo["values"] = labels
+            self.gh_preset_combo.configure(values=labels)
             ComboboxItemToolTip(self.gh_preset_combo, PRESET_DIRS_MAP)
             if selected_label and selected_label in new_presets:
                 self.gh_preset_var.set(selected_label)
@@ -2231,21 +2241,26 @@ class HFDownloaderApp(tk.Tk):
             elif self.gh_preset_var.get() not in new_presets and labels:
                 self.gh_preset_var.set(labels[0])
                 self._on_gh_preset_changed()
+            elif self.gh_preset_var.get() in new_presets:
+                self._on_gh_preset_changed()
 
         # 3. Update Tab 3 (Twitter)
         if hasattr(self, "tw_preset_combo"):
-            self.tw_preset_combo["values"] = labels
+            self.tw_preset_combo.configure(values=labels)
             if selected_label and selected_label in new_presets:
                 self.tw_preset_var.set(selected_label)
                 self.tw_dest_path_var.set(new_presets[selected_label])
             elif self.tw_preset_var.get() not in new_presets and labels:
                 self.tw_preset_var.set(labels[0])
                 self.tw_dest_path_var.set(new_presets[labels[0]])
+            elif self.tw_preset_var.get() in new_presets:
+                self.tw_dest_path_var.set(new_presets[self.tw_preset_var.get()])
 
         # 4. Update Tab 5 (Environment Setup)
         if hasattr(self, "tree_tab_dirs"):
             self._refresh_tab_env_dirs()
 
+        self.update_idletasks()
         self.log(f"[✓] 预设分类目录已实时更新 (当前共有 {len(new_presets)} 个预设路径)。")
 
     # ------------------ History & Starred Bookmarks Management ------------------
@@ -2797,7 +2812,7 @@ class HFDownloaderApp(tk.Tk):
         
         preset_names = list(PRESET_DIRS_MAP.keys())
         self.gh_preset_var = tk.StringVar(value=preset_names[0])
-        gh_preset_combo = ttk.Combobox(
+        self.gh_preset_combo = ttk.Combobox(
             gh_dest_frame, 
             textvariable=self.gh_preset_var, 
             values=preset_names, 
@@ -2805,9 +2820,9 @@ class HFDownloaderApp(tk.Tk):
             width=29, 
             font=FONT_BOLD
         )
-        gh_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=4, pady=3)
-        gh_preset_combo.bind("<<ComboboxSelected>>", self._on_gh_preset_changed)
-        ComboboxItemToolTip(gh_preset_combo, PRESET_DIRS_MAP)
+        self.gh_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=4, pady=3)
+        self.gh_preset_combo.bind("<<ComboboxSelected>>", self._on_gh_preset_changed)
+        ComboboxItemToolTip(self.gh_preset_combo, PRESET_DIRS_MAP)
 
         ttk.Label(gh_dest_frame, text="完整路径:").grid(row=0, column=2, sticky=tk.W, padx=(8, 4), pady=3)
         
