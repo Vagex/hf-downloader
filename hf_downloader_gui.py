@@ -105,6 +105,40 @@ PRESET_DIRS_MAP = {
     "🔤 文本编码器 (clip)": os.path.join(DEFAULT_COMFYUI_ROOT, "clip"),
 }
 
+def center_window_on_parent(win: tk.Toplevel, parent: Optional[tk.Widget] = None, width: Optional[int] = None, height: Optional[int] = None):
+    """Accurately center a child or dialog window relative to its parent window, keeping it strictly on-screen."""
+    try:
+        win.update_idletasks()
+        if parent:
+            parent.update_idletasks()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+        else:
+            pw = win.winfo_screenwidth()
+            ph = win.winfo_screenheight()
+            px = 0
+            py = 0
+
+        w = width or win.winfo_reqwidth() or win.winfo_width()
+        h = height or win.winfo_reqheight() or win.winfo_height()
+
+        if w <= 1: w = 560
+        if h <= 1: h = 380
+
+        x = px + max(0, (pw - w) // 2)
+        y = py + max(0, (ph - h) // 2)
+
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        x = max(10, min(x, sw - w - 20))
+        y = max(10, min(y, sh - h - 40))
+
+        win.geometry(f"{w}x{h}+{x}+{y}")
+    except Exception:
+        pass
+
 
 class ColorIconFactory:
     """Generates high-definition, anti-aliased 32-bit RGBA full-color icons directly in memory."""
@@ -376,13 +410,7 @@ class EnvironmentSetupDialog(tk.Toplevel):
         self.on_complete_callback = on_complete_callback
         self.is_installing = False
 
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_w = parent.winfo_width()
-        parent_h = parent.winfo_height()
-        x = parent_x + (parent_w - 720) // 2
-        y = parent_y + (parent_h - 560) // 2
-        self.geometry(f"+{max(50, x)}+{max(50, y)}")
+        center_window_on_parent(self, parent, 720, 560)
 
         self._build_ui()
         self._check_all_env_status()
@@ -546,15 +574,15 @@ class EnvironmentSetupDialog(tk.Toplevel):
 
                 if proc.returncode == 0:
                     self.after(0, lambda: self._log("\n[✓] 恭喜！所有核心依赖组件已全部自动安装并部署成功！"))
-                    self.after(0, lambda: messagebox.showinfo("部署成功", "所有核心依赖组件（含 huggingface_hub, hf_transfer, requests 等）已全部成功安装部署！"))
+                    self.after(0, lambda: messagebox.showinfo("部署成功", "所有核心依赖组件（含 huggingface_hub, hf_transfer, requests 等）已全部成功安装部署！", parent=self))
                     if self.on_complete_callback:
                         self.after(0, self.on_complete_callback)
                 else:
                     self.after(0, lambda: self._log(f"\n[✗] 安装过程返回异常代码: {proc.returncode}，请检查网络或切换镜像源后重试。"))
-                    self.after(0, lambda: messagebox.showerror("安装遇到问题", f"依赖安装未完全成功 (Code {proc.returncode})，请尝试切换上方不同的 PyPI 镜像源后重试。"))
+                    self.after(0, lambda: messagebox.showerror("安装遇到问题", f"依赖安装未完全成功 (Code {proc.returncode}, parent=self)，请尝试切换上方不同的 PyPI 镜像源后重试。"))
             except Exception as e:
                 self.after(0, lambda: self._log(f"\n[✗] 执行安装失败: {str(e)}"))
-                self.after(0, lambda: messagebox.showerror("错误", f"启动安装进程失败: {str(e)}"))
+                self.after(0, lambda: messagebox.showerror("错误", f"启动安装进程失败: {str(e, parent=self)}"))
 
             self.after(0, self._check_all_env_status)
             self.after(0, lambda: self.btn_install_all.config(state=tk.NORMAL, text="🚀 一键自动下载并安装部署全部依赖"))
@@ -576,13 +604,7 @@ class MirrorManagerDialog(tk.Toplevel):
         self.mirrors = list(current_mirrors)
         self.on_update_callback = on_update_callback
 
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_w = parent.winfo_width()
-        parent_h = parent.winfo_height()
-        x = parent_x + (parent_w - 560) // 2
-        y = parent_y + (parent_h - 420) // 2
-        self.geometry(f"+{max(50, x)}+{max(50, y)}")
+        center_window_on_parent(self, parent, 560, 420)
 
         self._build_ui()
 
@@ -636,13 +658,13 @@ class MirrorManagerDialog(tk.Toplevel):
     def add_mirror(self):
         url = self.new_mirror_var.get().strip().rstrip("/")
         if not url:
-            messagebox.showwarning("提示", "请输入镜像源 URL 地址！")
+            messagebox.showwarning("提示", "请输入镜像源 URL 地址！", parent=self)
             return
         if not (url.startswith("http://") or url.startswith("https://")):
             url = "https://" + url
 
         if url in self.mirrors:
-            messagebox.showinfo("提示", "该镜像源已在列表中。")
+            messagebox.showinfo("提示", "该镜像源已在列表中。", parent=self)
             return
 
         self.mirrors.append(url)
@@ -653,18 +675,18 @@ class MirrorManagerDialog(tk.Toplevel):
     def delete_selected_mirror(self):
         sel = self.listbox.curselection()
         if not sel:
-            messagebox.showinfo("提示", "请在上方列表中先选择要删除的镜像源。")
+            messagebox.showinfo("提示", "请在上方列表中先选择要删除的镜像源。", parent=self)
             return
         idx = sel[0]
         url = self.mirrors[idx]
 
-        if messagebox.askyesno("确认删除", f"确定要永久删除以下镜像源吗？\n{url}"):
+        if messagebox.askyesno("确认删除", f"确定要永久删除以下镜像源吗？\n{url}", parent=self):
             self.mirrors.pop(idx)
             self._refresh_listbox()
             self.on_update_callback(self.mirrors)
 
     def reset_default_mirrors(self):
-        if messagebox.askyesno("恢复默认", "确定要恢复为官方默认镜像源列表吗？"):
+        if messagebox.askyesno("恢复默认", "确定要恢复为官方默认镜像源列表吗？", parent=self):
             self.mirrors = list(DEFAULT_MIRRORS)
             self._refresh_listbox()
             self.on_update_callback(self.mirrors)
@@ -683,13 +705,7 @@ class ProxyManagerDialog(tk.Toplevel):
         self.proxies = list(current_proxies)
         self.on_update_callback = on_update_callback
 
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_w = parent.winfo_width()
-        parent_h = parent.winfo_height()
-        x = parent_x + (parent_w - 560) // 2
-        y = parent_y + (parent_h - 430) // 2
-        self.geometry(f"+{max(50, x)}+{max(50, y)}")
+        center_window_on_parent(self, parent, 560, 430)
 
         self._build_ui()
 
@@ -743,14 +759,14 @@ class ProxyManagerDialog(tk.Toplevel):
     def add_proxy(self):
         raw = self.new_proxy_var.get().strip().rstrip("/")
         if not raw:
-            messagebox.showwarning("提示", "请输入代理地址！")
+            messagebox.showwarning("提示", "请输入代理地址！", parent=self)
             return
 
         if "直连" not in raw and not (raw.startswith("http://") or raw.startswith("https://") or raw.startswith("socks5://") or raw.startswith("socks5h://")):
             raw = "http://" + raw
 
         if raw in self.proxies:
-            messagebox.showinfo("提示", "该代理地址已在列表中。")
+            messagebox.showinfo("提示", "该代理地址已在列表中。", parent=self)
             return
 
         self.proxies.append(raw)
@@ -761,22 +777,22 @@ class ProxyManagerDialog(tk.Toplevel):
     def delete_selected_proxy(self):
         sel = self.listbox.curselection()
         if not sel:
-            messagebox.showinfo("提示", "请在上方列表中先选择要删除的代理。")
+            messagebox.showinfo("提示", "请在上方列表中先选择要删除的代理。", parent=self)
             return
         idx = sel[0]
         val = self.proxies[idx]
 
         if "不使用代理" in val or "直连" in val:
-            messagebox.showwarning("提示", "【不使用代理 (直连)】为核心基础项，不可删除。")
+            messagebox.showwarning("提示", "【不使用代理 (直连)】为核心基础项，不可删除。", parent=self)
             return
 
-        if messagebox.askyesno("确认删除", f"确定要永久删除以下代理地址吗？\n{val}"):
+        if messagebox.askyesno("确认删除", f"确定要永久删除以下代理地址吗？\n{val}", parent=self):
             self.proxies.pop(idx)
             self._refresh_listbox()
             self.on_update_callback(self.proxies)
 
     def reset_default_proxies(self):
-        if messagebox.askyesno("恢复默认", "确定要恢复为默认常用代理列表吗？"):
+        if messagebox.askyesno("恢复默认", "确定要恢复为默认常用代理列表吗？", parent=self):
             self.proxies = list(DEFAULT_PROXIES)
             self._refresh_listbox()
             self.on_update_callback(self.proxies)
@@ -903,13 +919,7 @@ class HistoryManagerDialog(tk.Toplevel):
         self.default_platform = default_platform
         self.records: List[Dict[str, Any]] = HistoryManager.load_history()
 
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_w = parent.winfo_width()
-        parent_h = parent.winfo_height()
-        x = parent_x + (parent_w - 860) // 2
-        y = parent_y + (parent_h - 540) // 2
-        self.geometry(f"+{max(30, x)}+{max(30, y)}")
+        center_window_on_parent(self, parent, 860, 540)
 
         self._build_ui()
         self._filter_and_render()
@@ -1090,7 +1100,7 @@ class HistoryManagerDialog(tk.Toplevel):
     def load_selected(self):
         rec = self._get_selected_record()
         if not rec:
-            messagebox.showinfo("提示", "请先在表格中选择要载入的历史仓库！")
+            messagebox.showinfo("提示", "请先在表格中选择要载入的历史仓库！", parent=self)
             return
         
         self.destroy()
@@ -1107,7 +1117,7 @@ class HistoryManagerDialog(tk.Toplevel):
     def toggle_selected_star(self):
         rec = self._get_selected_record()
         if not rec:
-            messagebox.showinfo("提示", "请先选择要收藏/取消收藏的仓库记录！")
+            messagebox.showinfo("提示", "请先选择要收藏/取消收藏的仓库记录！", parent=self)
             return
         HistoryManager.toggle_star(rec["repo_id"], rec["platform"])
         self._filter_and_render()
@@ -1115,14 +1125,15 @@ class HistoryManagerDialog(tk.Toplevel):
     def edit_selected_note(self):
         rec = self._get_selected_record()
         if not rec:
-            messagebox.showinfo("提示", "请先选择要编辑备注的仓库！")
+            messagebox.showinfo("提示", "请先选择要编辑备注的仓库！", parent=self)
             return
         
         from tkinter import simpledialog
         new_note = simpledialog.askstring(
             "修改自定义备注",
             f"为仓库 [{rec['repo_id']}] 设置便于记忆的中文备注：",
-            initialvalue=rec.get("note", "")
+            initialvalue=rec.get("note", ""),
+            parent=self
         )
         if new_note is not None:
             HistoryManager.update_note(rec["repo_id"], rec["platform"], new_note.strip())
@@ -1131,15 +1142,15 @@ class HistoryManagerDialog(tk.Toplevel):
     def delete_selected(self):
         rec = self._get_selected_record()
         if not rec:
-            messagebox.showinfo("提示", "请先选择要删除的历史记录！")
+            messagebox.showinfo("提示", "请先选择要删除的历史记录！", parent=self)
             return
         
-        if messagebox.askyesno("确认删除", f"确定要从历史记录中移除该仓库吗？\n{rec['repo_id']}"):
+        if messagebox.askyesno("确认删除", f"确定要从历史记录中移除该仓库吗？\n{rec['repo_id']}", parent=self):
             HistoryManager.delete_record(rec["repo_id"], rec["platform"])
             self._filter_and_render()
 
     def clear_all_history(self):
-        if messagebox.askyesno("确认清空", "确定要清空全部仓库访问历史与收藏吗？\n此操作不可撤销！"):
+        if messagebox.askyesno("确认清空", "确定要清空全部仓库访问历史与收藏吗？\n此操作不可撤销！", parent=self):
             HistoryManager.clear_all()
             self._filter_and_render()
 
@@ -1156,13 +1167,7 @@ class DeleteConfirmDialog(tk.Toplevel):
 
         self.result: Optional[str] = None
 
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_w = parent.winfo_width()
-        parent_h = parent.winfo_height()
-        x = parent_x + (parent_w - 520) // 2
-        y = parent_y + (parent_h - 330) // 2
-        self.geometry(f"+{max(50, x)}+{max(50, y)}")
+        center_window_on_parent(self, parent, 520, 330)
 
         self._build_ui(task_count, file_names)
 
@@ -1365,11 +1370,34 @@ class QueueTask:
 
 
 class HFDownloaderApp(tk.Tk):
+    # ------------------ Centered Modal Dialog Helpers ------------------
+    def show_info(self, title: str, msg: str):
+        messagebox.showinfo(title, msg, parent=self)
+
+    def show_warning(self, title: str, msg: str):
+        messagebox.showwarning(title, msg, parent=self)
+
+    def show_error(self, title: str, msg: str):
+        messagebox.showerror(title, msg, parent=self)
+
+    def ask_yes_no(self, title: str, msg: str, **kwargs) -> bool:
+        return messagebox.askyesno(title, msg, parent=self, **kwargs)
+
+    def ask_yes_no_cancel(self, title: str, msg: str, **kwargs):
+        return messagebox.askyesnocancel(title, msg, parent=self, **kwargs)
+
     def __init__(self):
         super().__init__()
         self.title("🚀 Hugging Face 批量与断点续传极速下载器 (HF Explorer & Queue Manager)")
-        self.geometry("1220x880")
         self.minsize(940, 680)
+
+        # Center main window on screen
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        ww, wh = 1220, 880
+        x = max(20, (sw - ww) // 2)
+        y = max(20, (sh - wh) // 2)
+        self.geometry(f"{ww}x{wh}+{x}+{y}")
 
         # Style & Font configuration
         self.style = ttk.Style(self)
@@ -1590,16 +1618,16 @@ class HFDownloaderApp(tk.Tk):
                 cost = (time.time() - start_t) * 1000
                 if resp.status_code in (200, 401, 403):
                     msg = f"网络与代理连接畅通！\n\n• 目标站点: {endpoint}\n• 代理设置: {proxy or '直连'}\n• HTTP 状态码: {resp.status_code}\n• 响应延迟: {cost:.0f} ms"
-                    self.after(0, lambda: messagebox.showinfo("连接成功", msg))
+                    self.after(0, lambda: messagebox.showinfo("连接成功", msg, parent=self))
                     self.after(0, lambda: self.log(f"[✓] 连通性测试通过! 延迟: {cost:.0f} ms"))
                     self.after(0, lambda: self.lbl_status.config(text=f"状态: 网络连通正常 ({cost:.0f} ms)", foreground="green"))
                 else:
                     msg = f"连接返回异常状态码: {resp.status_code}\n• 目标: {endpoint}\n• 代理: {proxy or '直连'}"
-                    self.after(0, lambda: messagebox.showwarning("连接警告", msg))
+                    self.after(0, lambda: messagebox.showwarning("连接警告", msg, parent=self))
                     self.after(0, lambda: self.log(f"[!] 连通性测试警告: HTTP {resp.status_code}"))
             except Exception as e:
                 msg = f"无法通过当前配置连接到目标站点:\n\n• 目标: {endpoint}\n• 代理: {proxy or '直连'}\n• 错误详情: {str(e)}\n\n建议检查代理客户端是否开启 (如 Clash/v2rayN) 或切换镜像源！"
-                self.after(0, lambda: messagebox.showerror("连接失败", msg))
+                self.after(0, lambda: messagebox.showerror("连接失败", msg, parent=self))
                 self.after(0, lambda: self.log(f"[✗] 代理/网络连接失败: {str(e)}"))
                 self.after(0, lambda: self.lbl_status.config(text="状态: 连接失败", foreground="red"))
 
@@ -2152,13 +2180,13 @@ class HFDownloaderApp(tk.Tk):
                 resp = requests.head(test_url, proxies=proxies, timeout=8, allow_redirects=True)
                 latency = int((time.time() - t0) * 1000)
                 if resp.status_code in (200, 301, 302):
-                    self.after(0, lambda: messagebox.showinfo("测试成功", f"GitHub 加速节点连通正常！\n节点: {node}\n响应延迟: {latency} ms"))
+                    self.after(0, lambda: messagebox.showinfo("测试成功", f"GitHub 加速节点连通正常！\n节点: {node}\n响应延迟: {latency} ms", parent=self))
                     self.after(0, lambda: self.log(f"[✓] GitHub 加速节点测试成功: 延迟 {latency} ms"))
                     self.after(0, lambda: self.lbl_status.config(text=f"状态: GitHub 节点正常 ({latency} ms)", foreground="green"))
                 else:
-                    self.after(0, lambda: messagebox.showwarning("提示", f"节点返回状态码: HTTP {resp.status_code}\n建议更换其他加速源。"))
+                    self.after(0, lambda: messagebox.showwarning("提示", f"节点返回状态码: HTTP {resp.status_code}\n建议更换其他加速源。", parent=self))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("连接失败", f"节点连接超时/失败:\n{str(e)}"))
+                self.after(0, lambda: messagebox.showerror("连接失败", f"节点连接超时/失败:\n{str(e, parent=self)}"))
                 self.after(0, lambda: self.log(f"[✗] GitHub 节点连接失败: {str(e)}"))
                 self.after(0, lambda: self.lbl_status.config(text="状态: GitHub 节点连接失败", foreground="red"))
 
@@ -2174,7 +2202,7 @@ class HFDownloaderApp(tk.Tk):
             clean_repo = clean_repo[:-4]
         
         if not clean_repo or "/" not in clean_repo:
-            messagebox.showwarning("提示", "请输入有效的 GitHub 仓库名或链接 (例如: sepiablue-ai/minimax_h3_workflows)！")
+            messagebox.showwarning("提示", "请输入有效的 GitHub 仓库名或链接 (例如: sepiablue-ai/minimax_h3_workflows, parent=self)！")
             return
 
         self.gh_repo_var.set(clean_repo)
@@ -2353,7 +2381,7 @@ class HFDownloaderApp(tk.Tk):
         else:
             self.after(0, lambda: self.log(f"[✗] 获取 GitHub 资源失败: {err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 获取 GitHub 资源失败", foreground="red"))
-            self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取 GitHub 资源:\n{err_msg}\n\n提示: 如遇 API 速率限制，可在上方输入 GitHub Token。"))
+            self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取 GitHub 资源:\n{err_msg}\n\n提示: 如遇 API 速率限制，可在上方输入 GitHub Token。", parent=self))
 
         self.after(0, lambda: self.btn_gh_fetch.config(state=tk.NORMAL))
 
@@ -2466,12 +2494,12 @@ class HFDownloaderApp(tk.Tk):
                 target_keys = list(sel_iids)
 
         if not target_keys:
-            messagebox.showwarning("提示", "请先在右侧列表中勾选或鼠标选择需要下载的 GitHub 文件或资源！")
+            messagebox.showwarning("提示", "请先在右侧列表中勾选或鼠标选择需要下载的 GitHub 文件或资源！", parent=self)
             return
 
         dest_dir = self.gh_dest_path_var.get().strip()
         if not dest_dir:
-            messagebox.showwarning("提示", "请指定保存目标路径！")
+            messagebox.showwarning("提示", "请指定保存目标路径！", parent=self)
             return
 
         os.makedirs(dest_dir, exist_ok=True)
@@ -2523,7 +2551,7 @@ class HFDownloaderApp(tk.Tk):
         self.rescan_all_tasks(silent=True)
         self._refresh_queue_tree()
         self.log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
-        messagebox.showinfo("入队成功", f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
+        messagebox.showinfo("入队成功", f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！", parent=self)
 
         if jump or True:  # Jump to queue tab to show user the newly added tasks immediately
             self.notebook.select(2)
@@ -2531,7 +2559,7 @@ class HFDownloaderApp(tk.Tk):
     def download_github_repo_zip(self):
         repo_id = self.gh_repo_var.get().strip()
         if not repo_id or "/" not in repo_id:
-            messagebox.showwarning("提示", "请输入有效的 GitHub 仓库名！")
+            messagebox.showwarning("提示", "请输入有效的 GitHub 仓库名！", parent=self)
             return
 
         branch = self.gh_branch_var.get().strip() or "main"
@@ -2568,7 +2596,7 @@ class HFDownloaderApp(tk.Tk):
         self.rescan_all_tasks(silent=True)
         self._refresh_queue_tree()
         self.log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name}")
-        messagebox.showinfo("入队成功", f"已将 GitHub 整包源码 Zip 任务加入队列:\n{zip_name}\n保存到: {dest_dir}")
+        messagebox.showinfo("入队成功", f"已将 GitHub 整包源码 Zip 任务加入队列:\n{zip_name}\n保存到: {dest_dir}", parent=self)
         self.notebook.select(2)
 
     # ------------------ Tab 3: Download Queue UI with Checkboxes ------------------
@@ -2793,7 +2821,7 @@ class HFDownloaderApp(tk.Tk):
         if content:
             self.clipboard_clear()
             self.clipboard_append(content)
-            messagebox.showinfo("提示", "运行日志已复制到剪贴板。")
+            messagebox.showinfo("提示", "运行日志已复制到剪贴板。", parent=self)
 
     def clear_log_text(self):
         self.log_text.delete("1.0", tk.END)
@@ -2939,9 +2967,9 @@ class HFDownloaderApp(tk.Tk):
             if os.path.exists(c):
                 self.tab_env_comfy_var.set(c)
                 self._refresh_tab_env_dirs()
-                messagebox.showinfo("检测成功", f"成功探测到 ComfyUI 模型目录:\n{c}")
+                messagebox.showinfo("检测成功", f"成功探测到 ComfyUI 模型目录:\n{c}", parent=self)
                 return
-        messagebox.showwarning("提示", "未能自动探测到 ComfyUI 路径，请点击【浏览目录...】手动选择。")
+        messagebox.showwarning("提示", "未能自动探测到 ComfyUI 路径，请点击【浏览目录...】手动选择。", parent=self)
 
     def _refresh_tab_env_dirs(self):
         self.tree_tab_dirs.delete(*self.tree_tab_dirs.get_children())
@@ -2965,13 +2993,13 @@ class HFDownloaderApp(tk.Tk):
             if os.path.exists(path):
                 os.startfile(path)
             else:
-                if messagebox.askyesno("创建目录", f"目录不存在，是否立即创建？\n{path}"):
+                if messagebox.askyesno("创建目录", f"目录不存在，是否立即创建？\n{path}", parent=self):
                     try:
                         os.makedirs(path, exist_ok=True)
                         self._refresh_tab_env_dirs()
-                        messagebox.showinfo("成功", f"目录已成功创建:\n{path}")
+                        messagebox.showinfo("成功", f"目录已成功创建:\n{path}", parent=self)
                     except Exception as err:
-                        messagebox.showerror("错误", f"创建失败: {str(err)}")
+                        messagebox.showerror("错误", f"创建失败: {str(err, parent=self)}")
 
     def _create_all_preset_dirs(self):
         base = self.tab_env_comfy_var.get().strip()
@@ -2986,7 +3014,7 @@ class HFDownloaderApp(tk.Tk):
                 except Exception:
                     pass
         self._refresh_tab_env_dirs()
-        messagebox.showinfo("完成", f"一键环境部署完成！共补齐/创建 {created} 个模型分类目录。")
+        messagebox.showinfo("完成", f"一键环境部署完成！共补齐/创建 {created} 个模型分类目录。", parent=self)
 
     def _check_tab_env_status(self):
         self.tree_tab_pkgs.delete(*self.tree_tab_pkgs.get_children())
@@ -3024,12 +3052,12 @@ class HFDownloaderApp(tk.Tk):
                     self.after(0, lambda l=line: (self.tab_env_log_text.insert(tk.END, l), self.tab_env_log_text.see(tk.END)))
                 proc.wait()
                 if proc.returncode == 0:
-                    self.after(0, lambda: messagebox.showinfo("成功", "所有核心依赖已成功安装并部署完成！"))
+                    self.after(0, lambda: messagebox.showinfo("成功", "所有核心依赖已成功安装并部署完成！", parent=self))
                     self.after(0, self._on_env_setup_completed)
                 else:
-                    self.after(0, lambda: messagebox.showwarning("提示", "安装过程已结束，部分依赖可能有提示，请检查日志。"))
+                    self.after(0, lambda: messagebox.showwarning("提示", "安装过程已结束，部分依赖可能有提示，请检查日志。", parent=self))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("错误", f"执行异常: {str(e)}"))
+                self.after(0, lambda: messagebox.showerror("错误", f"执行异常: {str(e, parent=self)}"))
             finally:
                 self.after(0, lambda: self.btn_tab_install_deps.config(state=tk.NORMAL, text=" 🚀 一键极速下载并安装全部缺失依赖 "))
                 self.after(0, self._check_tab_env_status)
@@ -3124,7 +3152,7 @@ class HFDownloaderApp(tk.Tk):
         if not temp_files:
             self.after(0, lambda: self.log("[✓] 未发现任何正在传输的后台临时文件。"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 未检测到后台活跃下载", foreground="#555555"))
-            self.after(0, lambda: messagebox.showinfo("检测结果", "未发现任何正在下载或中断的临时文件。"))
+            self.after(0, lambda: messagebox.showinfo("检测结果", "未发现任何正在下载或中断的临时文件。", parent=self))
             return
 
         time.sleep(0.8)
@@ -3147,10 +3175,10 @@ class HFDownloaderApp(tk.Tk):
                 for t, spd in active_list:
                     msg += f"• [{t.task_id}] {os.path.basename(t.file_path)} (写入速率: {self._format_size(int(spd))}/s)\n"
                 self.log("[🔴 活跃后台任务]\n" + msg)
-                messagebox.showinfo("后台任务检测", msg)
+                messagebox.showinfo("后台任务检测", msg, parent=self)
             else:
                 self.log(f"[✓] 检测到 {len(stopped_list)} 个中断/静止文件，当前无后台进程在写入，可安全点击【开始/恢复】接续下载。")
-                messagebox.showinfo("后台任务检测", f"检测到 {len(stopped_list)} 个未完成的缓存文件，当前没有活跃的后台下载进程，您可以随时点击【恢复下载】继续。")
+                messagebox.showinfo("后台任务检测", f"检测到 {len(stopped_list, parent=self)} 个未完成的缓存文件，当前没有活跃的后台下载进程，您可以随时点击【恢复下载】继续。")
             self.lbl_status.config(text="状态: 检测完成", foreground="green")
 
         self.after(0, update_ui_result)
@@ -3158,10 +3186,10 @@ class HFDownloaderApp(tk.Tk):
     # ------------------ Safe Exit & Minimize to Background ------------------
     def hide_to_background(self):
         if not self.is_queue_running:
-            if messagebox.askyesno("提示", "当前没有正在进行的下载任务，确定要最小化隐藏到后台吗？"):
+            if messagebox.askyesno("提示", "当前没有正在进行的下载任务，确定要最小化隐藏到后台吗？", parent=self):
                 self.iconify()
         else:
-            messagebox.showinfo("后台静默运行", "下载器已在后台全速下载。\n您可以通过任务栏或重新运行启动器随时切回窗口。")
+            messagebox.showinfo("后台静默运行", "下载器已在后台全速下载。\n您可以通过任务栏或重新运行启动器随时切回窗口。", parent=self)
             self.iconify()
 
     def _on_window_closing(self):
@@ -3308,7 +3336,7 @@ class HFDownloaderApp(tk.Tk):
     def start_fetch_files(self):
         repo_id = self.repo_id_var.get().strip()
         if not repo_id:
-            messagebox.showwarning("提示", "请输入有效的 Repo ID！")
+            messagebox.showwarning("提示", "请输入有效的 Repo ID！", parent=self)
             return
 
         endpoint = self.mirror_var.get().strip().rstrip("/")
@@ -3445,7 +3473,7 @@ class HFDownloaderApp(tk.Tk):
         else:
             self.after(0, lambda: self.log(f"[错误] 获取文件列表失败: {err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 获取失败", foreground="red"))
-            self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取仓库文件列表:\n{err_msg}\n\n提示: 如遇网络连接超时，可尝试切换镜像源或在上方设置网络代理 (Proxy)。"))
+            self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取仓库文件列表:\n{err_msg}\n\n提示: 如遇网络连接超时，可尝试切换镜像源或在上方设置网络代理 (Proxy, parent=self)。"))
 
         self.after(0, lambda: self.btn_fetch.config(state=tk.NORMAL))
 
@@ -3585,12 +3613,12 @@ class HFDownloaderApp(tk.Tk):
                 target_fpaths = list(selected_rows)
 
         if not target_fpaths:
-            messagebox.showwarning("提示", "请先在右侧文件列表中勾选复选框 ☑ 或高亮选择要下载的文件！\n（或点击【将当前左侧目录全部文件加入下载队列】）")
+            messagebox.showwarning("提示", "请先在右侧文件列表中勾选复选框 ☑ 或高亮选择要下载的文件！\n（或点击【将当前左侧目录全部文件加入下载队列】）", parent=self)
             return
 
         dest_dir = self.dest_dir_var.get().strip()
         if not dest_dir:
-            messagebox.showwarning("提示", "请设置目标保存目录！")
+            messagebox.showwarning("提示", "请设置目标保存目录！", parent=self)
             return
 
         repo_id = self.repo_id_var.get().strip()
@@ -3653,12 +3681,12 @@ class HFDownloaderApp(tk.Tk):
                 matched_files.append(fpath)
 
         if not matched_files:
-            messagebox.showinfo("提示", "当前目录下没有文件。")
+            messagebox.showinfo("提示", "当前目录下没有文件。", parent=self)
             return
 
         dest_dir = self.dest_dir_var.get().strip()
         if not dest_dir:
-            messagebox.showwarning("提示", "请设置目标保存目录！")
+            messagebox.showwarning("提示", "请设置目标保存目录！", parent=self)
             return
 
         repo_id = self.repo_id_var.get().strip()
@@ -3707,7 +3735,7 @@ class HFDownloaderApp(tk.Tk):
         self.rescan_all_tasks(silent=True)
         dir_name = cur_dir if cur_dir else "根目录"
         self.log(f"[+] 已将目录 '{dir_name}' 下的 {added_count} 个文件加入下载队列 -> 保存至: {dest_dir}")
-        messagebox.showinfo("已加入队列", f"已将目录 '{dir_name}' 下的 {added_count} 个文件成功加入下载队列！")
+        messagebox.showinfo("已加入队列", f"已将目录 '{dir_name}' 下的 {added_count} 个文件成功加入下载队列！", parent=self)
 
     def _refresh_queue_tree(self):
         self.tree_queue.delete(*self.tree_queue.get_children())
@@ -3754,7 +3782,7 @@ class HFDownloaderApp(tk.Tk):
     def remove_selected_tasks(self):
         target_ids = self._get_target_task_ids()
         if not target_ids:
-            messagebox.showinfo("提示", "请先在队列表中勾选复选框 ☑ 或高亮选择要移除的任务。")
+            messagebox.showinfo("提示", "请先在队列表中勾选复选框 ☑ 或高亮选择要移除的任务。", parent=self)
             return
 
         remove_set = set(target_ids)
@@ -3762,7 +3790,7 @@ class HFDownloaderApp(tk.Tk):
 
         for t in target_tasks:
             if t.status == "下载中":
-                messagebox.showwarning("提示", f"任务 #{t.task_id} 正在下载中，请先暂停/停止后再移除！")
+                messagebox.showwarning("提示", f"任务 #{t.task_id} 正在下载中，请先暂停/停止后再移除！", parent=self)
                 return
 
         file_names = [f"#{t.task_id} - {os.path.basename(t.file_path)} ({t.status})" for t in target_tasks]
@@ -3813,7 +3841,7 @@ class HFDownloaderApp(tk.Tk):
             self.checked_tasks.difference_update(remove_set)
             self.rescan_all_tasks(silent=True)
             self.log(f"[-] 彻底删除完成: 已移除 {len(target_tasks)} 个任务，清理了 {deleted_file_count} 个实体文件及 {deleted_cache_count} 个临时缓存文件。")
-            messagebox.showinfo("彻底删除完成", f"已成功从队列移除 {len(target_tasks)} 个任务，\n并彻底清理了 {deleted_file_count} 个本地文件与 {deleted_cache_count} 个未完成缓存文件！")
+            messagebox.showinfo("彻底删除完成", f"已成功从队列移除 {len(target_tasks, parent=self)} 个任务，\n并彻底清理了 {deleted_file_count} 个本地文件与 {deleted_cache_count} 个未完成缓存文件！")
 
         elif choice == "queue_only":
             self.tasks = [t for t in self.tasks if t.task_id not in remove_set]
@@ -3824,7 +3852,7 @@ class HFDownloaderApp(tk.Tk):
     def clear_completed_tasks(self):
         done_tasks = [t for t in self.tasks if t.status == "已完成"]
         if not done_tasks:
-            messagebox.showinfo("提示", "当前队列中没有已完成的任务。")
+            messagebox.showinfo("提示", "当前队列中没有已完成的任务。", parent=self)
             return
 
         done_ids = {t.task_id for t in done_tasks}
@@ -3835,12 +3863,12 @@ class HFDownloaderApp(tk.Tk):
 
     def clear_all_tasks(self):
         if self.is_queue_running:
-            messagebox.showwarning("提示", "下载队列正在运行中，请先停止队列！")
+            messagebox.showwarning("提示", "下载队列正在运行中，请先停止队列！", parent=self)
             return
         if not self.tasks:
             return
 
-        choice = messagebox.askyesno("清空队列", "确定要清空队列中的所有任务记录吗？\n（仅清空队列记录，不删除本地已下载的文件）")
+        choice = messagebox.askyesno("清空队列", "确定要清空队列中的所有任务记录吗？\n（仅清空队列记录，不删除本地已下载的文件）", parent=self)
         if choice:
             self.tasks.clear()
             self.checked_tasks.clear()
@@ -3850,7 +3878,7 @@ class HFDownloaderApp(tk.Tk):
     def open_selected_task_folder(self):
         target_ids = self._get_target_task_ids()
         if not target_ids:
-            messagebox.showinfo("提示", "请在队列中选择或勾选一个任务。")
+            messagebox.showinfo("提示", "请在队列中选择或勾选一个任务。", parent=self)
             return
         target_id = target_ids[0]
         for t in self.tasks:
@@ -3858,7 +3886,7 @@ class HFDownloaderApp(tk.Tk):
                 if os.path.exists(t.dest_dir):
                     os.startfile(t.dest_dir)
                 else:
-                    messagebox.showinfo("提示", f"目录尚未创建:\n{t.dest_dir}")
+                    messagebox.showinfo("提示", f"目录尚未创建:\n{t.dest_dir}", parent=self)
                 return
 
     # ------------------ Context Menu Actions ------------------
@@ -3916,7 +3944,7 @@ class HFDownloaderApp(tk.Tk):
                 # If all selected are completed or something else, prompt or activate them
                 sel_tasks = [t for t in self.tasks if t.task_id in self.checked_tasks]
                 if sel_tasks and all(t.status == "已完成" for t in sel_tasks):
-                    choice = messagebox.askyesno("重新下载", "所勾选的任务均已完成，是否重新下载勾选的任务？")
+                    choice = messagebox.askyesno("重新下载", "所勾选的任务均已完成，是否重新下载勾选的任务？", parent=self)
                     if choice:
                         for t in sel_tasks:
                             t.clean_local_files_and_caches()
@@ -3928,12 +3956,12 @@ class HFDownloaderApp(tk.Tk):
                     else:
                         return
                 else:
-                    messagebox.showinfo("提示", "所勾选的任务中没有需要下载的任务。")
+                    messagebox.showinfo("提示", "所勾选的任务中没有需要下载的任务。", parent=self)
                     return
         else:
             pending_tasks = [t for t in self.tasks if t.status in ("等待中", "已中断", "已暂停", "失败")]
             if not pending_tasks:
-                messagebox.showinfo("提示", "当前队列中没有需要下载的任务（全部已完成或队列为空）。")
+                messagebox.showinfo("提示", "当前队列中没有需要下载的任务（全部已完成或队列为空）。", parent=self)
                 return
 
         self.is_queue_running = True
@@ -4199,7 +4227,7 @@ class HFDownloaderApp(tk.Tk):
         self.log(f"================ 队列任务结束 ({done_count}/{total_count} 完成) ================\n")
 
         if total_count > 0 and done_count == total_count:
-            messagebox.showinfo("队列完成", f"队列中的所有 {total_count} 个任务已全部下载完成！")
+            messagebox.showinfo("队列完成", f"队列中的所有 {total_count} 个任务已全部下载完成！", parent=self)
 
 if __name__ == "__main__":
     app = HFDownloaderApp()
