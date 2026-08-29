@@ -3089,39 +3089,29 @@ class HFDownloaderApp(tk.Tk):
 
         self.tree_tw_variants.bind("<Button-1>", self._on_tw_tree_click)
         self.tree_tw_variants.bind("<space>", self._on_tw_tree_space)
-        self.tree_tw_variants.bind("<Double-1>", lambda e: self.add_twitter_to_queue())
+        self.tree_tw_variants.bind("<Double-1>", lambda e: self.add_twitter_to_queue(jump=False))
 
-        # Bottom Action Bar inside Tab
-        tw_action_bar = ttk.Frame(tw_lower)
-        tw_action_bar.pack(fill=tk.X, pady=(6, 0))
+        # Bottom Actions Bar of Tab 3 (Unified with Tab 1 & Tab 2)
+        tw_act_frame = ttk.Frame(self.tab_twitter)
+        tw_act_frame.pack(fill=tk.X, pady=(4, 0))
 
-        btn_add_tw_queue = tk.Button(
-            tw_action_bar,
-            text="⬇️ 将已勾选画质规格加入统一下载队列",
-            font=FONT_BOLD,
-            bg="#0d6efd",
-            fg="#ffffff",
-            activebackground="#0b5ed7",
-            activeforeground="#ffffff",
-            relief=tk.RAISED,
-            padx=14, pady=5,
-            command=self.add_twitter_to_queue
+        btn_tw_add_q = ttk.Button(
+            tw_act_frame, text=" 加入统一下载队列", image=self.icons["download"], compound=tk.LEFT,
+            command=lambda: self.add_twitter_to_queue(jump=False)
         )
-        btn_add_tw_queue.pack(side=tk.LEFT, padx=(0, 6))
+        btn_tw_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
 
-        btn_tw_quick_dl = tk.Button(
-            tw_action_bar,
-            text="🚀 立即下载最高画质 (1080P/720P) 并加入队列",
-            font=FONT_BOLD,
-            bg="#198754",
-            fg="#ffffff",
-            activebackground="#157347",
-            activeforeground="#ffffff",
-            relief=tk.RAISED,
-            padx=14, pady=5,
+        btn_tw_highest = ttk.Button(
+            tw_act_frame, text=" 下载最高画质 (1080P/720P)", image=self.icons["rocket"], compound=tk.LEFT,
             command=self.quick_download_twitter_highest
         )
-        btn_tw_quick_dl.pack(side=tk.LEFT, padx=6)
+        btn_tw_highest.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        btn_tw_add_jump = ttk.Button(
+            tw_act_frame, text=" 入队并跳转到队列", image=self.icons["play"], compound=tk.LEFT,
+            command=lambda: self.add_twitter_to_queue(jump=True)
+        )
+        btn_tw_add_jump.pack(side=tk.LEFT, padx=4, ipady=3)
 
         self.tw_resolved_data = None
         self.checked_tw_variants: Set[int] = set()
@@ -3275,7 +3265,7 @@ class HFDownloaderApp(tk.Tk):
                 self._update_tw_checkbox_display(idx)
         self._update_tw_checked_count_label()
 
-    def add_twitter_to_queue(self):
+    def add_twitter_to_queue(self, jump: bool = False):
         if not self.tw_resolved_data or not self.tw_resolved_data.get("variants"):
             messagebox.showwarning("提示", "请先解析推文视频！", parent=self)
             return
@@ -3343,7 +3333,8 @@ class HFDownloaderApp(tk.Tk):
             self._refresh_queue_tree()
             self.log(f"[✓] 已将 {added_cnt} 项 Twitter 视频任务成功加入统一下载队列！")
             messagebox.showinfo("入队成功", f"成功将 {added_cnt} 项 Twitter 视频任务加入统一下载队列！\n目标目录: {dest_dir}", parent=self)
-            self.notebook.select(3)
+            if jump:
+                self.notebook.select(3)
         else:
             messagebox.showinfo("提示", "所选的任务均已在队列中！", parent=self)
 
@@ -3356,7 +3347,7 @@ class HFDownloaderApp(tk.Tk):
         self.checked_tw_variants.add(0) # Select index 0 (Highest resolution)
         self._update_tw_checkbox_display(0)
         self._update_tw_checked_count_label()
-        self.add_twitter_to_queue()
+        self.add_twitter_to_queue(jump=True)
         if not self.is_queue_running:
             self.start_queue_download()
 

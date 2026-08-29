@@ -2890,8 +2890,9 @@ def main(page: ft.Page):
             expand=True, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=6
         ),
         ft.Row([
-            ft.ElevatedButton("⬇️ 将勾选画质规格加入统一下载队列", icon=ft.Icons.DOWNLOAD, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=lambda e: add_tw_to_queue(False), height=38),
-            ft.ElevatedButton("🚀 立即下载最高画质 (并跳转队列)", icon=ft.Icons.ROCKET_LAUNCH, bgcolor=COLOR_SUCCESS, color=ft.Colors.WHITE, on_click=lambda e: add_tw_to_queue(True), height=38),
+            ft.ElevatedButton("加入统一下载队列", icon=ft.Icons.DOWNLOAD, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=lambda e: add_tw_to_queue(False), height=38),
+            ft.ElevatedButton("🚀 下载最高画质 (1080P/720P)", icon=ft.Icons.ROCKET_LAUNCH, on_click=lambda e: (checked_tw_indices.clear() or checked_tw_indices.add(0) or add_tw_to_queue(False)), height=38),
+            ft.ElevatedButton("入队并跳转到队列", icon=ft.Icons.PLAY_ARROW, on_click=lambda e: add_tw_to_queue(True), height=38),
         ], spacing=8)
     ], expand=True, spacing=6)
 
