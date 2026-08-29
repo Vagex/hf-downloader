@@ -1710,7 +1710,7 @@ class HFDownloaderApp(tk.Tk):
         self.btn_fetch = ttk.Button(config_frame, text=" 获取文件列表", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_files)
         self.btn_fetch.grid(row=0, column=6, padx=4, pady=3)
 
-        btn_hf_hist = ttk.Button(config_frame, text=" 🕒 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("huggingface"))
+        btn_hf_hist = ttk.Button(config_frame, text=" 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("huggingface"))
         btn_hf_hist.grid(row=0, column=7, padx=4, pady=3)
 
         # Row 1: Mirror selector with custom management button & Token input with visibility toggle
@@ -2028,7 +2028,7 @@ class HFDownloaderApp(tk.Tk):
         self.btn_gh_fetch = ttk.Button(config_frame, text=" 获取 GitHub 资源", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_github)
         self.btn_gh_fetch.grid(row=0, column=6, padx=4, pady=3)
 
-        btn_gh_hist = ttk.Button(config_frame, text=" 🕒 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("github"))
+        btn_gh_hist = ttk.Button(config_frame, text=" 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("github"))
         btn_gh_hist.grid(row=0, column=7, padx=4, pady=3)
 
         # Row 1: Accelerator Mirror with Test Button & GitHub Token with Focus Save
@@ -2205,7 +2205,7 @@ class HFDownloaderApp(tk.Tk):
         btn_gh_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
 
         btn_gh_zip = ttk.Button(
-            gh_act_frame, text=" 📦 下载整包源码 Zip (含加速)", image=self.icons["rocket"], compound=tk.LEFT,
+            gh_act_frame, text=" 下载整包源码 Zip (含加速)", image=self.icons["rocket"], compound=tk.LEFT,
             command=self.download_github_repo_zip
         )
         btn_gh_zip.pack(side=tk.LEFT, padx=4, ipady=3)
