@@ -2,7 +2,7 @@ import os
 import sys
 import time
 import json
-import datetime
+from datetime import datetime
 import threading
 import subprocess
 import tkinter as tk
@@ -33,6 +33,7 @@ LOCK_FILE = os.path.join(CONFIG_DIR, "hf_downloader_active.lock")
 MIRRORS_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_mirrors.json")
 PROXIES_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_proxies.json")
 APP_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_settings.json")
+HISTORY_DB_FILE = os.path.join(CONFIG_DIR, "hf_downloader_history.json")
 
 # Default Mirror Endpoints
 DEFAULT_MIRRORS = [
@@ -216,6 +217,20 @@ class ColorIconFactory:
         d.polygon([(8, 1), (10, 6), (15, 8), (10, 10), (8, 15), (6, 10), (1, 8), (6, 6)], fill="#38bdf8", outline="#0284c7")
         d.polygon([(14, 1), (15, 3), (17, 4), (15, 5), (14, 7), (13, 5), (11, 4), (13, 3)], fill="#fbbf24")
         icons_pil["clean"] = img_clean
+
+        # 14. Clock / History (Indigo Watch Face with Hands)
+        img_clock = Image.new("RGBA", (18, 18), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img_clock)
+        d.ellipse([1, 1, 16, 16], fill="#e0e7ff", outline="#6366f1", width=2)
+        d.line([9, 4, 9, 9], fill="#4338ca", width=2)
+        d.line([9, 9, 13, 9], fill="#4338ca", width=2)
+        icons_pil["clock"] = img_clock
+
+        # 15. Star / Bookmark (Golden Five-Pointed Star)
+        img_star = Image.new("RGBA", (18, 18), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img_star)
+        d.polygon([(9, 1), (11, 6), (17, 7), (12, 11), (14, 17), (9, 13), (4, 17), (6, 11), (1, 7), (7, 6)], fill="#f59e0b", outline="#d97706")
+        icons_pil["star"] = img_star
 
         # Convert all to ImageTk.PhotoImage
         icons_tk = {}
@@ -765,6 +780,368 @@ class ProxyManagerDialog(tk.Toplevel):
             self.on_update_callback(self.proxies)
 
 
+# ------------------ History & Starred Repository Database ------------------
+class HistoryManager:
+    """Lightweight persistent JSON database manager for Hugging Face and GitHub repository access history."""
+    
+    @staticmethod
+    def load_history() -> List[Dict[str, Any]]:
+        if os.path.exists(HISTORY_DB_FILE):
+            try:
+                with open(HISTORY_DB_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("history", [])
+            except Exception:
+                return []
+        return []
+
+    @staticmethod
+    def save_history(records: List[Dict[str, Any]]):
+        try:
+            with open(HISTORY_DB_FILE, "w", encoding="utf-8") as f:
+                json.dump({"history": records}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @staticmethod
+    def record_access(repo_id: str, platform: str, repo_type: str = "model", branch: str = "main", file_count: int = 0, note: str = "") -> List[Dict[str, Any]]:
+        records = HistoryManager.load_history()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        target = None
+        for r in records:
+            if r.get("repo_id") == repo_id and r.get("platform") == platform:
+                target = r
+                break
+        
+        if target:
+            target["last_accessed"] = now_str
+            target["branch"] = branch
+            target["repo_type"] = repo_type
+            if file_count > 0:
+                target["file_count"] = file_count
+            if note:
+                target["note"] = note
+            records.remove(target)
+            records.insert(0, target)
+        else:
+            records.insert(0, {
+                "repo_id": repo_id,
+                "platform": platform,
+                "repo_type": repo_type,
+                "branch": branch,
+                "file_count": file_count,
+                "last_accessed": now_str,
+                "is_starred": False,
+                "note": note
+            })
+        
+        # Sort: starred first, then last_accessed desc
+        records.sort(key=lambda x: (not x.get("is_starred", False), x.get("last_accessed", "")), reverse=False)
+        records = records[:300]
+        HistoryManager.save_history(records)
+        return records
+
+    @staticmethod
+    def toggle_star(repo_id: str, platform: str) -> bool:
+        records = HistoryManager.load_history()
+        new_state = False
+        for r in records:
+            if r.get("repo_id") == repo_id and r.get("platform") == platform:
+                r["is_starred"] = not r.get("is_starred", False)
+                new_state = r["is_starred"]
+                break
+        records.sort(key=lambda x: (not x.get("is_starred", False), x.get("last_accessed", "")), reverse=False)
+        HistoryManager.save_history(records)
+        return new_state
+
+    @staticmethod
+    def update_note(repo_id: str, platform: str, note: str):
+        records = HistoryManager.load_history()
+        for r in records:
+            if r.get("repo_id") == repo_id and r.get("platform") == platform:
+                r["note"] = note
+                break
+        HistoryManager.save_history(records)
+
+    @staticmethod
+    def delete_record(repo_id: str, platform: str):
+        records = HistoryManager.load_history()
+        records = [r for r in records if not (r.get("repo_id") == repo_id and r.get("platform") == platform)]
+        HistoryManager.save_history(records)
+
+    @staticmethod
+    def clear_all():
+        HistoryManager.save_history([])
+
+    @staticmethod
+    def get_recent_repos(platform: Optional[str] = None) -> List[str]:
+        records = HistoryManager.load_history()
+        res = []
+        for r in records:
+            if platform is None or r.get("platform") == platform:
+                rid = r.get("repo_id")
+                if rid and rid not in res:
+                    res.append(rid)
+        return res
+
+
+class HistoryManagerDialog(tk.Toplevel):
+    """Visual Manager Dialog for Repository Access History and Starred Bookmarks."""
+    
+    def __init__(self, parent, on_load_callback, default_platform: Optional[str] = None):
+        super().__init__(parent)
+        self.title("🕒 仓库历史记录与智能收藏库 (History & Starred Hub)")
+        self.geometry("860x540")
+        self.minsize(720, 420)
+        self.transient(parent)
+        self.grab_set()
+
+        self.on_load_callback = on_load_callback
+        self.default_platform = default_platform
+        self.records: List[Dict[str, Any]] = HistoryManager.load_history()
+
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_w = parent.winfo_width()
+        parent_h = parent.winfo_height()
+        x = parent_x + (parent_w - 860) // 2
+        y = parent_y + (parent_h - 540) // 2
+        self.geometry(f"+{max(30, x)}+{max(30, y)}")
+
+        self._build_ui()
+        self._filter_and_render()
+
+    def _build_ui(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Top Filter and Search Bar
+        top_bar = ttk.Frame(main_frame)
+        top_bar.pack(fill=tk.X, pady=(0, 8))
+
+        ttk.Label(top_bar, text="🔍 搜索历史:", font=FONT_BOLD).pack(side=tk.LEFT, padx=(0, 4))
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *args: self._filter_and_render())
+        search_entry = ttk.Entry(top_bar, textvariable=self.search_var, width=28, font=FONT_NORMAL)
+        search_entry.pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Label(top_bar, text="平台筛选:", font=FONT_BOLD).pack(side=tk.LEFT, padx=(0, 4))
+        self.filter_platform_var = tk.StringVar(value="全部历史")
+        platform_options = ["全部历史", "🤗 Hugging Face", "🐙 GitHub", "⭐ 仅看收藏"]
+        if self.default_platform == "huggingface":
+            self.filter_platform_var.set("🤗 Hugging Face")
+        elif self.default_platform == "github":
+            self.filter_platform_var.set("🐙 GitHub")
+
+        filter_combo = ttk.Combobox(
+            top_bar, 
+            textvariable=self.filter_platform_var, 
+            values=platform_options, 
+            width=16, 
+            state="readonly", 
+            font=FONT_NORMAL
+        )
+        filter_combo.pack(side=tk.LEFT, padx=(0, 10))
+        filter_combo.bind("<<ComboboxSelected>>", lambda e: self._filter_and_render())
+
+        self.lbl_stats = ttk.Label(top_bar, text="共 0 条记录", font=FONT_SMALL, foreground="#555555")
+        self.lbl_stats.pack(side=tk.RIGHT, padx=4)
+
+        # 2. Main History Treeview
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        cols = ("star", "platform", "repo_id", "branch", "file_count", "time", "note")
+        self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse")
+        
+        self.tree.heading("star", text="⭐ 收藏", anchor=tk.CENTER)
+        self.tree.heading("platform", text="平台", anchor=tk.CENTER)
+        self.tree.heading("repo_id", text="仓库 ID / 项目名称", anchor=tk.W)
+        self.tree.heading("branch", text="分支/Tag", anchor=tk.CENTER)
+        self.tree.heading("file_count", text="文件数", anchor=tk.CENTER)
+        self.tree.heading("time", text="最后访问时间", anchor=tk.CENTER)
+        self.tree.heading("note", text="自定义备注 (双击编辑)", anchor=tk.W)
+
+        self.tree.column("star", width=65, minwidth=55, stretch=False, anchor=tk.CENTER)
+        self.tree.column("platform", width=120, minwidth=100, stretch=False, anchor=tk.CENTER)
+        self.tree.column("repo_id", width=250, minwidth=180, stretch=True, anchor=tk.W)
+        self.tree.column("branch", width=80, minwidth=70, stretch=False, anchor=tk.CENTER)
+        self.tree.column("file_count", width=75, minwidth=65, stretch=False, anchor=tk.CENTER)
+        self.tree.column("time", width=130, minwidth=120, stretch=False, anchor=tk.CENTER)
+        self.tree.column("note", width=180, minwidth=120, stretch=True, anchor=tk.W)
+
+        self.tree.tag_configure("starred_tag", background="#fff8e1")
+        self.tree.tag_configure("hf_tag", foreground="#0d6efd")
+        self.tree.tag_configure("gh_tag", foreground="#198754")
+
+        scroll_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        scroll_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+
+        self.tree.grid(row=0, column=0, sticky=tk.NSEW)
+        scroll_y.grid(row=0, column=1, sticky=tk.NS)
+        scroll_x.grid(row=1, column=0, sticky=tk.EW)
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+
+        self.tree.bind("<Double-1>", self._on_double_click)
+
+        # 3. Bottom Action Buttons Bar
+        action_bar = ttk.Frame(main_frame)
+        action_bar.pack(fill=tk.X)
+
+        btn_load = tk.Button(
+            action_bar,
+            text="🚀 载入并检索选中仓库",
+            font=FONT_BOLD,
+            bg="#0d6efd",
+            fg="#ffffff",
+            activebackground="#0b5ed7",
+            activeforeground="#ffffff",
+            padx=12, pady=4,
+            command=self.load_selected
+        )
+        btn_load.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_star = ttk.Button(action_bar, text="⭐ 切换收藏", command=self.toggle_selected_star)
+        btn_star.pack(side=tk.LEFT, padx=4)
+
+        btn_edit_note = ttk.Button(action_bar, text="✏️ 编辑备注...", command=self.edit_selected_note)
+        btn_edit_note.pack(side=tk.LEFT, padx=4)
+
+        btn_del = ttk.Button(action_bar, text="🗑️ 删除记录", command=self.delete_selected)
+        btn_del.pack(side=tk.LEFT, padx=4)
+
+        btn_clear = ttk.Button(action_bar, text="🧹 清空历史", command=self.clear_all_history)
+        btn_clear.pack(side=tk.LEFT, padx=6)
+
+        btn_close = ttk.Button(action_bar, text="关闭窗口", command=self.destroy)
+        btn_close.pack(side=tk.RIGHT)
+
+    def _filter_and_render(self):
+        self.records = HistoryManager.load_history()
+        search_kw = self.search_var.get().strip().lower()
+        platform_filter = self.filter_platform_var.get()
+
+        filtered = []
+        for r in self.records:
+            # Platform filtering
+            if platform_filter == "🤗 Hugging Face" and r.get("platform") != "huggingface":
+                continue
+            elif platform_filter == "🐙 GitHub" and r.get("platform") != "github":
+                continue
+            elif platform_filter == "⭐ 仅看收藏" and not r.get("is_starred", False):
+                continue
+
+            # Search keyword matching
+            if search_kw:
+                rid = r.get("repo_id", "").lower()
+                note = r.get("note", "").lower()
+                branch = r.get("branch", "").lower()
+                if search_kw not in rid and search_kw not in note and search_kw not in branch:
+                    continue
+
+            filtered.append(r)
+
+        self.tree.delete(*self.tree.get_children())
+        for i, item in enumerate(filtered):
+            is_starred = item.get("is_starred", False)
+            star_sym = "⭐ 收藏" if is_starred else "☆"
+            plat = "🤗 HuggingFace" if item.get("platform") == "huggingface" else "🐙 GitHub"
+            f_count = f"{item.get('file_count', 0)} 项" if item.get("file_count") else "--"
+            
+            tags = []
+            if is_starred:
+                tags.append("starred_tag")
+            if item.get("platform") == "huggingface":
+                tags.append("hf_tag")
+            else:
+                tags.append("gh_tag")
+
+            self.tree.insert(
+                "", tk.END, iid=str(i),
+                values=(
+                    star_sym,
+                    plat,
+                    item.get("repo_id", ""),
+                    item.get("branch", "main"),
+                    f_count,
+                    item.get("last_accessed", "--"),
+                    item.get("note", "")
+                ),
+                tags=tuple(tags)
+            )
+
+        self.filtered_records = filtered
+        self.lbl_stats.config(text=f"显示 {len(filtered)} / 共 {len(self.records)} 条")
+
+    def _get_selected_record(self) -> Optional[Dict[str, Any]]:
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        idx = int(sel[0])
+        if 0 <= idx < len(self.filtered_records):
+            return self.filtered_records[idx]
+        return None
+
+    def load_selected(self):
+        rec = self._get_selected_record()
+        if not rec:
+            messagebox.showinfo("提示", "请先在表格中选择要载入的历史仓库！")
+            return
+        
+        self.destroy()
+        self.on_load_callback(
+            platform=rec.get("platform", "huggingface"),
+            repo_id=rec.get("repo_id", ""),
+            repo_type=rec.get("repo_type", "model"),
+            branch=rec.get("branch", "main")
+        )
+
+    def _on_double_click(self, event):
+        self.load_selected()
+
+    def toggle_selected_star(self):
+        rec = self._get_selected_record()
+        if not rec:
+            messagebox.showinfo("提示", "请先选择要收藏/取消收藏的仓库记录！")
+            return
+        HistoryManager.toggle_star(rec["repo_id"], rec["platform"])
+        self._filter_and_render()
+
+    def edit_selected_note(self):
+        rec = self._get_selected_record()
+        if not rec:
+            messagebox.showinfo("提示", "请先选择要编辑备注的仓库！")
+            return
+        
+        from tkinter import simpledialog
+        new_note = simpledialog.askstring(
+            "修改自定义备注",
+            f"为仓库 [{rec['repo_id']}] 设置便于记忆的中文备注：",
+            initialvalue=rec.get("note", "")
+        )
+        if new_note is not None:
+            HistoryManager.update_note(rec["repo_id"], rec["platform"], new_note.strip())
+            self._filter_and_render()
+
+    def delete_selected(self):
+        rec = self._get_selected_record()
+        if not rec:
+            messagebox.showinfo("提示", "请先选择要删除的历史记录！")
+            return
+        
+        if messagebox.askyesno("确认删除", f"确定要从历史记录中移除该仓库吗？\n{rec['repo_id']}"):
+            HistoryManager.delete_record(rec["repo_id"], rec["platform"])
+            self._filter_and_render()
+
+    def clear_all_history(self):
+        if messagebox.askyesno("确认清空", "确定要清空全部仓库访问历史与收藏吗？\n此操作不可撤销！"):
+            HistoryManager.clear_all()
+            self._filter_and_render()
+
+
 class DeleteConfirmDialog(tk.Toplevel):
     """Custom modal dialog allowing user to choose deletion scope: queue only vs file+cache deletion."""
     def __init__(self, parent, task_count: int, file_names: List[str]):
@@ -1136,6 +1513,33 @@ class HFDownloaderApp(tk.Tk):
         self._save_settings()
         self.log(f"[✓] 网络代理列表已更新并永久保存 (当前共有 {len(self.proxies_list)} 个配置项)。")
 
+    # ------------------ History & Starred Bookmarks Management ------------------
+    def open_history_dialog(self, default_platform: Optional[str] = None):
+        HistoryManagerDialog(self, on_load_callback=self._load_repo_from_history, default_platform=default_platform)
+
+    def _load_repo_from_history(self, platform: str, repo_id: str, repo_type: str = "model", branch: str = "main"):
+        if platform == "github":
+            self.notebook.select(1)
+            self.gh_repo_var.set(repo_id)
+            if branch:
+                self.gh_branch_var.set(branch)
+            self._on_gh_preset_changed()
+            self.start_fetch_github()
+        else:
+            self.notebook.select(0)
+            self.repo_id_var.set(repo_id)
+            self.repo_type_var.set(repo_type or "model")
+            if branch:
+                self.branch_var.set(branch)
+            self._on_repo_type_changed()
+            self.start_fetch_files()
+
+    def _refresh_history_comboboxes(self):
+        if hasattr(self, "repo_combo"):
+            self.repo_combo["values"] = HistoryManager.get_recent_repos("huggingface")
+        if hasattr(self, "gh_repo_combo"):
+            self.gh_repo_combo["values"] = HistoryManager.get_recent_repos("github")
+
     def open_env_setup(self):
         self.notebook.select(3)
         self._check_tab_env_status()
@@ -1240,11 +1644,11 @@ class HFDownloaderApp(tk.Tk):
         config_frame = ttk.LabelFrame(self.browse_pane_upper, text=" 🤗 Hugging Face 仓库、模型与网络加速配置 ", padding="6")
         config_frame.pack(fill=tk.X, pady=(0, 4))
 
-        # Row 0: Repo ID, Type, Branch, Fetch button, Env button
+        # Row 0: Repo ID, Type, Branch, Fetch button, History button
         ttk.Label(config_frame, text="HF 仓库 (Repo ID):").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
         self.repo_id_var = tk.StringVar(value="Kijai/MiniMax-H3-experimental")
-        repo_entry = ttk.Entry(config_frame, textvariable=self.repo_id_var, width=32, font=FONT_NORMAL)
-        repo_entry.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
+        self.repo_combo = ttk.Combobox(config_frame, textvariable=self.repo_id_var, values=HistoryManager.get_recent_repos("huggingface"), width=30, font=FONT_NORMAL)
+        self.repo_combo.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
 
         ttk.Label(config_frame, text="类型:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=3)
         self.repo_type_var = tk.StringVar(value="model")
@@ -1258,6 +1662,9 @@ class HFDownloaderApp(tk.Tk):
 
         self.btn_fetch = ttk.Button(config_frame, text=" 获取文件列表", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_files)
         self.btn_fetch.grid(row=0, column=6, padx=4, pady=3)
+
+        btn_hf_hist = ttk.Button(config_frame, text=" 🕒 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("huggingface"))
+        btn_hf_hist.grid(row=0, column=7, padx=4, pady=3)
 
         # Row 1: Mirror selector with custom management button & Token input with visibility toggle
         ttk.Label(config_frame, text="下载镜像源:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=3)
@@ -1555,11 +1962,11 @@ class HFDownloaderApp(tk.Tk):
         config_frame = ttk.LabelFrame(pane_upper, text=" 🐙 GitHub 仓库、Release与网络加速配置 ", padding="6")
         config_frame.pack(fill=tk.X, pady=(0, 4))
 
-        # Row 0: Repo ID, Mode (Release/SourceTree), Branch/Tag, Fetch Button
+        # Row 0: Repo ID, Mode (Release/SourceTree), Branch/Tag, Fetch Button, History Button
         ttk.Label(config_frame, text="GitHub 仓库 (owner/repo):").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
         self.gh_repo_var = tk.StringVar(value="comfyanonymous/ComfyUI")
-        gh_repo_entry = ttk.Entry(config_frame, textvariable=self.gh_repo_var, width=30, font=FONT_NORMAL)
-        gh_repo_entry.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
+        self.gh_repo_combo = ttk.Combobox(config_frame, textvariable=self.gh_repo_var, values=HistoryManager.get_recent_repos("github"), width=28, font=FONT_NORMAL)
+        self.gh_repo_combo.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
 
         ttk.Label(config_frame, text="资源模式:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=3)
         self.gh_mode_var = tk.StringVar(value="📦 Release 发布包")
@@ -1573,6 +1980,9 @@ class HFDownloaderApp(tk.Tk):
 
         self.btn_gh_fetch = ttk.Button(config_frame, text=" 获取 GitHub 资源", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_github)
         self.btn_gh_fetch.grid(row=0, column=6, padx=4, pady=3)
+
+        btn_gh_hist = ttk.Button(config_frame, text=" 🕒 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("github"))
+        btn_gh_hist.grid(row=0, column=7, padx=4, pady=3)
 
         # Row 1: Accelerator Mirror & GitHub Token
         ttk.Label(config_frame, text="国内极速加速节点:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=3)
@@ -1933,6 +2343,8 @@ class HFDownloaderApp(tk.Tk):
             self.raw_gh_items = items_map
             self.gh_nav_structure = nav_structure
             self.checked_gh_items.clear()
+            HistoryManager.record_access(repo_id, "github", "github", actual_branch, len(items_map))
+            self.after(0, self._refresh_history_comboboxes)
             self.after(0, self._populate_github_browser)
             self.after(0, lambda: self.log(f"[✓] 成功获取 GitHub {len(items_map)} 项资源。"))
             self.after(0, lambda: self.lbl_status.config(text=f"状态: 共检索到 {len(items_map)} 项 GitHub 资源", foreground="green"))
@@ -3002,6 +3414,8 @@ class HFDownloaderApp(tk.Tk):
         if files_map:
             self.raw_files_dict = files_map
             self.checked_files.clear()
+            HistoryManager.record_access(repo_id, "huggingface", repo_type, branch, len(files_map))
+            self.after(0, self._refresh_history_comboboxes)
             self.after(0, self._populate_dual_pane_browser)
             self.after(0, lambda: self.log(f"[✓] 成功获取到 {len(files_map)} 个文件，已按双栏文件浏览器组织。"))
             self.after(0, lambda: self.lbl_status.config(text=f"状态: 共获取到 {len(files_map)} 个文件", foreground="green"))

@@ -2,7 +2,7 @@ import os
 import sys
 import time
 import json
-import datetime
+from datetime import datetime
 import threading
 import subprocess
 from typing import List, Optional, Dict, Any, Tuple, Set
@@ -31,6 +31,111 @@ LOCK_FILE = os.path.join(CONFIG_DIR, "hf_downloader_active.lock")
 MIRRORS_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_mirrors.json")
 PROXIES_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_proxies.json")
 APP_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_settings.json")
+HISTORY_DB_FILE = os.path.join(CONFIG_DIR, "hf_downloader_history.json")
+
+# ------------------ History & Starred Repository Database ------------------
+class HistoryManager:
+    """Lightweight persistent JSON database manager for Hugging Face and GitHub repository access history."""
+    
+    @staticmethod
+    def load_history() -> List[Dict[str, Any]]:
+        if os.path.exists(HISTORY_DB_FILE):
+            try:
+                with open(HISTORY_DB_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("history", [])
+            except Exception:
+                return []
+        return []
+
+    @staticmethod
+    def save_history(records: List[Dict[str, Any]]):
+        try:
+            with open(HISTORY_DB_FILE, "w", encoding="utf-8") as f:
+                json.dump({"history": records}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @staticmethod
+    def record_access(repo_id: str, platform: str, repo_type: str = "model", branch: str = "main", file_count: int = 0, note: str = "") -> List[Dict[str, Any]]:
+        records = HistoryManager.load_history()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        target = None
+        for r in records:
+            if r.get("repo_id") == repo_id and r.get("platform") == platform:
+                target = r
+                break
+        
+        if target:
+            target["last_accessed"] = now_str
+            target["branch"] = branch
+            target["repo_type"] = repo_type
+            if file_count > 0:
+                target["file_count"] = file_count
+            if note:
+                target["note"] = note
+            records.remove(target)
+            records.insert(0, target)
+        else:
+            records.insert(0, {
+                "repo_id": repo_id,
+                "platform": platform,
+                "repo_type": repo_type,
+                "branch": branch,
+                "file_count": file_count,
+                "last_accessed": now_str,
+                "is_starred": False,
+                "note": note
+            })
+        
+        records.sort(key=lambda x: (not x.get("is_starred", False), x.get("last_accessed", "")), reverse=False)
+        records = records[:300]
+        HistoryManager.save_history(records)
+        return records
+
+    @staticmethod
+    def toggle_star(repo_id: str, platform: str) -> bool:
+        records = HistoryManager.load_history()
+        new_state = False
+        for r in records:
+            if r.get("repo_id") == repo_id and r.get("platform") == platform:
+                r["is_starred"] = not r.get("is_starred", False)
+                new_state = r["is_starred"]
+                break
+        records.sort(key=lambda x: (not x.get("is_starred", False), x.get("last_accessed", "")), reverse=False)
+        HistoryManager.save_history(records)
+        return new_state
+
+    @staticmethod
+    def update_note(repo_id: str, platform: str, note: str):
+        records = HistoryManager.load_history()
+        for r in records:
+            if r.get("repo_id") == repo_id and r.get("platform") == platform:
+                r["note"] = note
+                break
+        HistoryManager.save_history(records)
+
+    @staticmethod
+    def delete_record(repo_id: str, platform: str):
+        records = HistoryManager.load_history()
+        records = [r for r in records if not (r.get("repo_id") == repo_id and r.get("platform") == platform)]
+        HistoryManager.save_history(records)
+
+    @staticmethod
+    def clear_all():
+        HistoryManager.save_history([])
+
+    @staticmethod
+    def get_recent_repos(platform: Optional[str] = None) -> List[str]:
+        records = HistoryManager.load_history()
+        res = []
+        for r in records:
+            if platform is None or r.get("platform") == platform:
+                rid = r.get("repo_id")
+                if rid and rid not in res:
+                    res.append(rid)
+        return res
 
 # Default Mirror Endpoints
 DEFAULT_MIRRORS = [
@@ -621,6 +726,7 @@ def main(page: ft.Page):
                 raw_files_dict = files_map
                 checked_files.clear()
                 collapsed_dirs.clear()
+                HistoryManager.record_access(repo_id, "huggingface", repo_type, branch, len(files_map))
                 
                 # Auto-link to controlnet or root
                 if any(f.startswith("controlnet/") for f in files_map):
@@ -1284,6 +1390,117 @@ def main(page: ft.Page):
     btn_start_q = ft.ElevatedButton("开始/恢复队列", icon=ft.Icons.PLAY_ARROW, bgcolor=COLOR_SUCCESS, color=ft.Colors.WHITE, on_click=start_queue, height=38)
     btn_stop_q = ft.ElevatedButton("暂停/终止队列", icon=ft.Icons.PAUSE, bgcolor=COLOR_WARNING, color=ft.Colors.WHITE, disabled=True, on_click=stop_queue, height=38)
 
+    def open_history_dialog(default_platform: Optional[str] = None):
+        search_tf = ft.TextField(hint_text="搜索仓库名或备注...", prefix_icon=ft.Icons.SEARCH, dense=True, expand=True, height=38)
+        col_hist_list = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO, height=360)
+
+        def refresh_hist_modal(filter_txt=""):
+            records = HistoryManager.load_history()
+            col_hist_list.controls.clear()
+            
+            for r in records:
+                rid = r.get("repo_id", "")
+                plat = r.get("platform", "")
+                note = r.get("note", "")
+                is_star = r.get("is_starred", False)
+                branch = r.get("branch", "main")
+                fcount = r.get("file_count", 0)
+                t_str = r.get("last_accessed", "--")
+
+                if filter_txt:
+                    if filter_txt.lower() not in rid.lower() and filter_txt.lower() not in note.lower():
+                        continue
+
+                def make_load_action(p=plat, repo=rid, b=branch, rtype=r.get("repo_type", "model")):
+                    def _load(e):
+                        dlg_hist.open = False
+                        page.update()
+                        if p == "github":
+                            switch_to_tab("github")
+                            tf_gh_repo.value = repo
+                            tf_gh_branch.value = b
+                            start_fetch_gh()
+                        else:
+                            switch_to_tab("browse")
+                            tf_repo.value = repo
+                            tf_branch.value = b
+                            dd_type.value = rtype
+                            start_fetch()
+                    return _load
+
+                def make_toggle_star(repo=rid, p=plat):
+                    def _toggle(e):
+                        HistoryManager.toggle_star(repo, p)
+                        refresh_hist_modal(search_tf.value)
+                    return _toggle
+
+                def make_del(repo=rid, p=plat):
+                    def _del(e):
+                        HistoryManager.delete_record(repo, p)
+                        refresh_hist_modal(search_tf.value)
+                    return _del
+
+                plat_icon = ft.Icons.AUTO_AWESOME if plat == "huggingface" else ft.Icons.CODE
+                plat_label = "🤗 HF" if plat == "huggingface" else "🐙 GitHub"
+
+                row_card = ft.Container(
+                    content=ft.Row([
+                        ft.IconButton(
+                            icon=ft.Icons.STAR if is_star else ft.Icons.STAR_BORDER,
+                            icon_color=COLOR_WARNING if is_star else ft.Colors.OUTLINE,
+                            on_click=make_toggle_star(),
+                            tooltip="收藏置顶"
+                        ),
+                        ft.Container(
+                            content=ft.Text(plat_label, size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                            bgcolor=COLOR_ACCENT if plat == "huggingface" else COLOR_SUCCESS,
+                            border_radius=4,
+                            padding=ft.Padding.symmetric(horizontal=6, vertical=2)
+                        ),
+                        ft.Column([
+                            ft.Text(rid, weight=ft.FontWeight.BOLD, size=13),
+                            ft.Text(f"分支: {branch} | {fcount} 文件 | 访问: {t_str}" + (f" | 备注: {note}" if note else ""), size=11, color=COLOR_TEXT_SECONDARY)
+                        ], expand=True, spacing=2),
+                        ft.ElevatedButton("载入", icon=ft.Icons.ARROW_FORWARD, on_click=make_load_action(), height=32),
+                        ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, icon_color=COLOR_DANGER, on_click=make_del(), tooltip="删除记录")
+                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+                    border_radius=6,
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+                    bgcolor=COLOR_CARD_DARK
+                )
+                col_hist_list.controls.append(row_card)
+            
+            if not col_hist_list.controls:
+                col_hist_list.controls.append(
+                    ft.Container(content=ft.Text("暂无符合条件的历史记录", color=COLOR_TEXT_SECONDARY, text_align=ft.TextAlign.CENTER), padding=20)
+                )
+            page.update()
+
+        search_tf.on_change = lambda e: refresh_hist_modal(search_tf.value)
+
+        dlg_hist = ft.AlertDialog(
+            title=ft.Text("🕒 仓库历史记录与智能收藏库 (History & Starred Hub)", weight=ft.FontWeight.BOLD),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Row([search_tf]),
+                    col_hist_list
+                ], spacing=8),
+                width=720, height=440
+            ),
+            actions=[
+                ft.TextButton("清空历史", on_click=lambda e: (HistoryManager.clear_all(), refresh_hist_modal())),
+                ft.ElevatedButton("关闭", on_click=lambda e: (setattr(dlg_hist, 'open', False), page.update()))
+            ]
+        )
+        page.overlay.append(dlg_hist)
+        dlg_hist.open = True
+        refresh_hist_modal()
+        page.update()
+
+    btn_hf_hist = ft.ElevatedButton("历史/收藏", icon=ft.Icons.HISTORY, on_click=lambda e: open_history_dialog("huggingface"), height=38)
+    btn_gh_hist = ft.ElevatedButton("历史/收藏", icon=ft.Icons.HISTORY, on_click=lambda e: open_history_dialog("github"), height=38)
+
     # Assemble Top Configuration Card (Strict 36px Height Grid)
     top_config_container = ft.Container(
         content=ft.Column([
@@ -1292,7 +1509,8 @@ def main(page: ft.Page):
                 ft.Text("HF 仓库:", size=13, weight=ft.FontWeight.BOLD), tf_repo,
                 ft.Text("类型:", size=13, weight=ft.FontWeight.BOLD), dd_type,
                 ft.Text("分支:", size=13, weight=ft.FontWeight.BOLD), tf_branch,
-                btn_fetch
+                btn_fetch,
+                btn_hf_hist
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
                 ft.Text("镜像加速:", size=13, weight=ft.FontWeight.BOLD), dd_mirror,
@@ -1770,6 +1988,7 @@ def main(page: ft.Page):
                 raw_gh_items = items_map
                 gh_nav_structure = nav_struct
                 checked_gh_items.clear()
+                HistoryManager.record_access(clean_repo, "github", "github", actual_branch, len(items_map))
                 populate_gh_views()
                 log(f"[✓] 成功获取 GitHub {len(items_map)} 项资源。")
                 lbl_global_status.value = f"状态: 共检索到 {len(items_map)} 项 GitHub 资源"
@@ -1967,7 +2186,8 @@ def main(page: ft.Page):
                 ft.Text("GitHub 仓库:", size=13, weight=ft.FontWeight.BOLD), tf_gh_repo,
                 ft.Text("模式:", size=13, weight=ft.FontWeight.BOLD), dd_gh_mode,
                 ft.Text("分支/Tag:", size=13, weight=ft.FontWeight.BOLD), tf_gh_branch,
-                btn_gh_fetch
+                btn_gh_fetch,
+                btn_gh_hist
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             ft.Row([
                 ft.Text("加速节点:", size=13, weight=ft.FontWeight.BOLD), dd_gh_mirror,
