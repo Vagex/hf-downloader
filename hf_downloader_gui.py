@@ -1753,24 +1753,32 @@ class HFDownloaderApp(tk.Tk):
         threading.Thread(target=_worker, daemon=True).start()
 
     def start_fetch_github(self):
-        repo_id = self.gh_repo_var.get().strip()
-        if not repo_id or "/" not in repo_id:
-            messagebox.showwarning("提示", "请输入有效的 GitHub 仓库名 (格式: owner/repo，例如 comfyanonymous/ComfyUI)！")
+        raw_input = self.gh_repo_var.get().strip()
+        # Clean URL if user pasted full github URL
+        clean_repo = raw_input
+        if "github.com/" in clean_repo:
+            clean_repo = clean_repo.split("github.com/")[-1].split(".git")[0].strip("/")
+        elif clean_repo.endswith(".git"):
+            clean_repo = clean_repo[:-4]
+        
+        if not clean_repo or "/" not in clean_repo:
+            messagebox.showwarning("提示", "请输入有效的 GitHub 仓库名或链接 (例如: sepiablue-ai/minimax_h3_workflows)！")
             return
 
+        self.gh_repo_var.set(clean_repo)
         self._on_gh_preset_changed()
         self.btn_gh_fetch.config(state=tk.DISABLED)
-        self.lbl_status.config(text=f"状态: 正在获取 GitHub [{repo_id}] 资源...", foreground="blue")
-        self.log(f"\n[*] 正在查询 GitHub 仓库 '{repo_id}' 资源列表...")
+        self.lbl_status.config(text=f"状态: 正在智能分析 GitHub [{clean_repo}] 仓库与分支...", foreground="blue")
+        self.log(f"\n[*] 正在连接 GitHub API 查询仓库 '{clean_repo}'...")
 
-        threading.Thread(target=self._fetch_github_worker, daemon=True).start()
-
-    def _fetch_github_worker(self):
-        repo_id = self.gh_repo_var.get().strip()
         mode = self.gh_mode_var.get().strip()
-        branch = self.gh_branch_var.get().strip() or "main"
+        branch_input = self.gh_branch_var.get().strip()
         token = self.gh_token_var.get().strip() or None
         proxies = self._get_request_proxies()
+
+        threading.Thread(target=self._fetch_github_worker, args=(clean_repo, mode, branch_input, token, proxies), daemon=True).start()
+
+    def _fetch_github_worker(self, repo_id: str, mode: str, branch_input: str, token: Optional[str], proxies: Optional[dict]):
 
         headers = {"User-Agent": "HF-Downloader-GUI/1.0", "Accept": "application/vnd.github.v3+json"}
         if token:
@@ -1779,95 +1787,147 @@ class HFDownloaderApp(tk.Tk):
         items_map = {}
         nav_structure = {}
         err_msg = None
+        actual_branch = branch_input or "main"
 
-        if "Release" in mode:
-            api_url = f"https://api.github.com/repos/{repo_id}/releases"
-            try:
-                resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=12)
-                if resp.status_code == 200:
-                    releases = resp.json()
-                    if not releases:
-                        err_msg = "该仓库尚未发布任何 Release 版本。"
-                    else:
-                        for rel in releases:
-                            tag_name = rel.get("tag_name", "未知Tag")
-                            rel_name = rel.get("name") or tag_name
-                            pub_date = (rel.get("published_at") or "--")[:16].replace("T", " ")
-                            
-                            nav_structure[tag_name] = f"📦 {tag_name} ({pub_date})"
-                            
-                            # Add release source code zip
-                            zipball = rel.get("zipball_url") or f"https://github.com/{repo_id}/archive/refs/tags/{tag_name}.zip"
-                            key_zip = f"{tag_name}/[Source code] {repo_id.split('/')[-1]}-{tag_name}.zip"
-                            items_map[key_zip] = {
-                                "name": f"[源码包] {repo_id.split('/')[-1]}-{tag_name}.zip",
-                                "scope": tag_name,
-                                "size_str": "整包Zip",
-                                "raw_size": 0,
-                                "date_str": pub_date,
-                                "downloads": "--",
-                                "url": zipball
-                            }
+        # 1. Fetch Repository Metadata to get actual default_branch
+        try:
+            repo_api_url = f"https://api.github.com/repos/{repo_id}"
+            r_info = requests.get(repo_api_url, headers=headers, proxies=proxies, timeout=10)
+            if r_info.status_code == 200:
+                repo_info = r_info.json()
+                default_b = repo_info.get("default_branch") or "main"
+                if not branch_input or branch_input in ("main", "master"):
+                    actual_branch = default_b
+                    self.after(0, lambda b=actual_branch: self.gh_branch_var.set(b))
+            elif r_info.status_code == 404:
+                err_msg = "未找到该 GitHub 仓库，请核对 owner/repo 拼写或确认是否为私有仓库。"
+            elif r_info.status_code == 403:
+                err_msg = "GitHub API 调用频率已达上限，请在上方输入 GitHub Token！"
+        except Exception as e:
+            pass  # Fallback to direct fetch
 
-                            for asset in rel.get("assets", []):
-                                aname = asset.get("name")
-                                asize = asset.get("size") or 0
-                                adate = (asset.get("updated_at") or pub_date)[:16].replace("T", " ")
-                                adls = str(asset.get("download_count", 0))
-                                aurl = asset.get("browser_download_url")
-
-                                key = f"{tag_name}/{aname}"
-                                items_map[key] = {
-                                    "name": aname,
+        if not err_msg:
+            # 2. Release Mode or Fallback
+            if "Release" in mode:
+                api_url = f"https://api.github.com/repos/{repo_id}/releases"
+                try:
+                    resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=12)
+                    if resp.status_code == 200:
+                        releases = resp.json()
+                        if releases:
+                            for rel in releases:
+                                tag_name = rel.get("tag_name", "未知Tag")
+                                rel_name = rel.get("name") or tag_name
+                                pub_date = (rel.get("published_at") or "--")[:16].replace("T", " ")
+                                
+                                nav_structure[tag_name] = f"📦 {tag_name} ({pub_date})"
+                                
+                                zipball = rel.get("zipball_url") or f"https://github.com/{repo_id}/archive/refs/tags/{tag_name}.zip"
+                                key_zip = f"{tag_name}/[Source code] {repo_id.split('/')[-1]}-{tag_name}.zip"
+                                items_map[key_zip] = {
+                                    "name": f"[源码包] {repo_id.split('/')[-1]}-{tag_name}.zip",
                                     "scope": tag_name,
-                                    "size_str": self._format_size(asize),
-                                    "raw_size": asize,
-                                    "date_str": adate,
-                                    "downloads": adls,
-                                    "url": aurl
+                                    "size_str": "整包Zip",
+                                    "raw_size": 0,
+                                    "date_str": pub_date,
+                                    "downloads": "--",
+                                    "url": zipball
                                 }
-                elif resp.status_code == 404:
-                    err_msg = "未找到该仓库，请检查 owner/repo 拼写。"
-                elif resp.status_code == 403:
-                    err_msg = "GitHub API 调用频率受限，建议填入 GitHub Token！"
-                else:
-                    err_msg = f"HTTP {resp.status_code}: {resp.text[:120]}"
-            except Exception as e:
-                err_msg = str(e)
-        else:
-            # Source code tree mode
-            api_url = f"https://api.github.com/repos/{repo_id}/git/trees/{branch}?recursive=1"
-            try:
-                resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=15)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    tree = data.get("tree", [])
-                    nav_structure["ROOT"] = "📁 全部源码 (根目录 /)"
 
-                    for item in tree:
-                        itype = item.get("type")
-                        ipath = item.get("path")
-                        if itype == "tree":
-                            nav_structure[ipath] = f"📁 {ipath}"
-                        elif itype == "blob":
-                            isize = item.get("size") or 0
-                            raw_url = f"https://raw.githubusercontent.com/{repo_id}/{branch}/{ipath}"
-                            scope = os.path.dirname(ipath) if "/" in ipath else "ROOT"
-                            items_map[ipath] = {
-                                "name": ipath,
-                                "scope": scope,
-                                "size_str": self._format_size(isize),
-                                "raw_size": isize,
-                                "date_str": "--",
-                                "downloads": "--",
-                                "url": raw_url
-                            }
-                elif resp.status_code == 404:
-                    err_msg = f"未找到仓库或分支 '{branch}'，请核对分支名称。"
-                else:
-                    err_msg = f"HTTP {resp.status_code}: {resp.text[:120]}"
-            except Exception as e:
-                err_msg = str(e)
+                                for asset in rel.get("assets", []):
+                                    aname = asset.get("name")
+                                    asize = asset.get("size") or 0
+                                    adate = (asset.get("updated_at") or pub_date)[:16].replace("T", " ")
+                                    adls = str(asset.get("download_count", 0))
+                                    aurl = asset.get("browser_download_url")
+
+                                    key = f"{tag_name}/{aname}"
+                                    items_map[key] = {
+                                        "name": aname,
+                                        "scope": tag_name,
+                                        "size_str": self._format_size(asize),
+                                        "raw_size": asize,
+                                        "date_str": adate,
+                                        "downloads": adls,
+                                        "url": aurl
+                                    }
+                        else:
+                            # Auto fallback to source tree mode
+                            self.log(f"[i] 该仓库未发布 Release，自动为您切换为【源码目录树】模式拉取分支 '{actual_branch}'...")
+                            self.after(0, lambda: self.gh_mode_var.set("🌲 源码目录树"))
+                            mode = "🌲 源码目录树"
+                    elif resp.status_code == 404:
+                        err_msg = "未找到该仓库，请检查 owner/repo 拼写。"
+                    elif resp.status_code == 403:
+                        err_msg = "GitHub API 调用频率受限，建议填入 GitHub Token！"
+                    else:
+                        err_msg = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                except Exception as e:
+                    err_msg = str(e)
+
+            # 3. Source Tree Mode (or fallen back from Release)
+            if "源码" in mode and not items_map and not err_msg:
+                api_url = f"https://api.github.com/repos/{repo_id}/git/trees/{actual_branch}?recursive=1"
+                try:
+                    resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=15)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        tree = data.get("tree", [])
+                        nav_structure["ROOT"] = "📁 全部源码 (根目录 /)"
+
+                        for item in tree:
+                            itype = item.get("type")
+                            ipath = item.get("path")
+                            if itype == "tree":
+                                nav_structure[ipath] = f"📁 {ipath}"
+                            elif itype == "blob":
+                                isize = item.get("size") or 0
+                                raw_url = f"https://raw.githubusercontent.com/{repo_id}/{actual_branch}/{ipath}"
+                                scope = os.path.dirname(ipath) if "/" in ipath else "ROOT"
+                                items_map[ipath] = {
+                                    "name": ipath,
+                                    "scope": scope,
+                                    "size_str": self._format_size(isize),
+                                    "raw_size": isize,
+                                    "date_str": "最新",
+                                    "downloads": "--",
+                                    "url": raw_url
+                                }
+                    elif resp.status_code == 404:
+                        # Try alternate branch (master <-> main)
+                        alt_branch = "master" if actual_branch == "main" else "main"
+                        alt_url = f"https://api.github.com/repos/{repo_id}/git/trees/{alt_branch}?recursive=1"
+                        alt_resp = requests.get(alt_url, headers=headers, proxies=proxies, timeout=15)
+                        if alt_resp.status_code == 200:
+                            data = alt_resp.json()
+                            tree = data.get("tree", [])
+                            nav_structure["ROOT"] = "📁 全部源码 (根目录 /)"
+                            self.after(0, lambda b=alt_branch: self.gh_branch_var.set(b))
+
+                            for item in tree:
+                                itype = item.get("type")
+                                ipath = item.get("path")
+                                if itype == "tree":
+                                    nav_structure[ipath] = f"📁 {ipath}"
+                                elif itype == "blob":
+                                    isize = item.get("size") or 0
+                                    raw_url = f"https://raw.githubusercontent.com/{repo_id}/{alt_branch}/{ipath}"
+                                    scope = os.path.dirname(ipath) if "/" in ipath else "ROOT"
+                                    items_map[ipath] = {
+                                        "name": ipath,
+                                        "scope": scope,
+                                        "size_str": self._format_size(isize),
+                                        "raw_size": isize,
+                                        "date_str": "最新",
+                                        "downloads": "--",
+                                        "url": raw_url
+                                    }
+                        else:
+                            err_msg = f"未找到仓库或分支 '{actual_branch}'，请核对分支名称。"
+                    else:
+                        err_msg = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                except Exception as e:
+                    err_msg = str(e)
 
         if items_map:
             self.raw_gh_items = items_map
