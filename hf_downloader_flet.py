@@ -2271,6 +2271,10 @@ def main(page: ft.Page):
                 ft.ElevatedButton("检测加速节点", icon=ft.Icons.BOLT, on_click=test_gh_node, height=38),
                 ft.Text("GitHub Token:", size=13, weight=ft.FontWeight.BOLD), tf_gh_token
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Row([
+                ft.Text("网络代理:", size=13, weight=ft.FontWeight.BOLD), dd_proxy,
+                ft.ElevatedButton("检测代理连通性", icon=ft.Icons.BOLT, on_click=test_proxy, height=38)
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         ], spacing=6),
         border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
         border_radius=8,

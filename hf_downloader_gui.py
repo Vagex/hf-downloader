@@ -1536,6 +1536,8 @@ class HFDownloaderApp(tk.Tk):
         self.proxies_list = new_proxies
         self._save_proxies()
         self.proxy_combo["values"] = self.proxies_list
+        if hasattr(self, "gh_proxy_combo"):
+            self.gh_proxy_combo["values"] = self.proxies_list
         if selected:
             self.proxy_var.set(selected)
         elif self.proxy_var.get() not in self.proxies_list and self.proxies_list:
@@ -2032,6 +2034,23 @@ class HFDownloaderApp(tk.Tk):
         gh_token_entry = ttk.Entry(config_frame, textvariable=self.gh_token_var, show="*", font=FONT_NORMAL)
         gh_token_entry.grid(row=1, column=3, columnspan=5, sticky=tk.EW, padx=4, pady=3)
         ToolTip(gh_token_entry, "可选。当遇到 GitHub API 速率限制 (Rate Limit) 时，可在此填入个人 GitHub Personal Access Token 提升配额")
+
+        # Row 2: Proxy settings & management (Identical to Hugging Face)
+        ttk.Label(config_frame, text="网络代理 (Proxy):").grid(row=2, column=0, sticky=tk.W, padx=4, pady=3)
+
+        proxy_gh_subframe = ttk.Frame(config_frame)
+        proxy_gh_subframe.grid(row=2, column=1, sticky=tk.EW, padx=4, pady=3)
+
+        self.gh_proxy_combo = ttk.Combobox(proxy_gh_subframe, textvariable=self.proxy_var, values=self.proxies_list, font=FONT_NORMAL)
+        self.gh_proxy_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.gh_proxy_combo.bind("<<ComboboxSelected>>", lambda e: self._save_settings())
+        self.gh_proxy_combo.bind("<FocusOut>", lambda e: self._save_settings())
+
+        btn_gh_manage_proxy = ttk.Button(proxy_gh_subframe, text=" 增删管理代理...", image=self.icons["shield"], compound=tk.LEFT, width=14, command=self.open_proxy_manager)
+        btn_gh_manage_proxy.pack(side=tk.RIGHT, padx=(4, 0))
+
+        btn_gh_test_proxy = ttk.Button(proxy_gh_subframe, text=" 检测连通性", image=self.icons["bolt"], compound=tk.LEFT, width=12, command=self.test_proxy_connectivity)
+        btn_gh_test_proxy.pack(side=tk.RIGHT, padx=(4, 0))
 
         config_frame.columnconfigure(1, weight=1)
 
