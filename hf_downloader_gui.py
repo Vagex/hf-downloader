@@ -1000,6 +1000,7 @@ class HFDownloaderApp(tk.Tk):
             self.style.theme_use("clam")
 
         self.style.configure(".", font=FONT_NORMAL)
+        self.style.configure("TNotebook.Tab", font=FONT_BOLD, padding=[12, 6])
         self.style.configure("Treeview", font=FONT_TABLE, rowheight=28)
         self.style.configure("Treeview.Heading", font=FONT_BOLD)
         self.style.configure("TLabelframe.Label", font=FONT_TITLE)
