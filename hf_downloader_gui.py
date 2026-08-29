@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import datetime
 from datetime import datetime
 import threading
 import subprocess
@@ -1260,7 +1261,10 @@ class TwitterMediaResolver:
 
     @staticmethod
     def extract_tweet_id(raw_input: str) -> Optional[str]:
+        if not raw_input:
+            return None
         raw_input = raw_input.strip()
+        # Clean URL query params if status id is followed by ?
         m = re.search(r'status/(\d+)', raw_input)
         if m:
             return m.group(1)
@@ -1276,9 +1280,10 @@ class TwitterMediaResolver:
         if not tweet_id and "http" not in raw_input:
             raise ValueError("请输入有效的 Twitter / X 推文链接或 Tweet ID！")
 
-        target_url = raw_input if raw_input.startswith("http") else f"https://x.com/i/status/{tweet_id}"
+        target_url = f"https://twitter.com/i/status/{tweet_id}" if tweet_id else raw_input.strip()
+        last_error_details = []
 
-        # Strategy 1: yt-dlp deep resolution (if available)
+        # Strategy 1: yt-dlp deep resolution (Primary engine)
         try:
             import yt_dlp
             ydl_opts = {
@@ -1286,6 +1291,8 @@ class TwitterMediaResolver:
                 'no_warnings': True,
                 'extract_flat': False,
                 'skip_download': True,
+                'socket_timeout': 15,
+                'nocheckcertificate': True
             }
             if proxy:
                 ydl_opts['proxy'] = proxy
@@ -1331,7 +1338,7 @@ class TwitterMediaResolver:
                                 q_label = f"🎬 360P 流畅 ({width}x{height})"
                             else:
                                 q_label = f"🎬 {height}P ({width}x{height})"
-                        elif vcodec != 'none' and furl.endswith('.mp4'):
+                        elif vcodec != 'none' and ('.mp4' in furl or furl.endswith('.mp4')):
                             q_label = "🎬 标准 MP4 视频"
                         elif acodec != 'none' and vcodec == 'none':
                             q_label = "🎵 仅提取音频 (Audio Stream)"
@@ -1372,8 +1379,8 @@ class TwitterMediaResolver:
                             "thumbnail": thumbnail,
                             "variants": video_variants
                         }
-        except Exception:
-            pass
+        except Exception as e_ytdlp:
+            last_error_details.append(f"yt-dlp: {str(e_ytdlp)}")
 
         # Strategy 2: Syndication API fallback (Pure requests)
         if tweet_id:
@@ -1434,10 +1441,11 @@ class TwitterMediaResolver:
                             "thumbnail": None,
                             "variants": variants_list
                         }
-            except Exception:
-                pass
+            except Exception as e_syn:
+                last_error_details.append(f"Syndication: {str(e_syn)}")
 
-        raise ValueError("未能解析到该推文中的视频，请确认链接是否有效，或确认是否已开启网络代理！")
+        err_summary = "; ".join(last_error_details) if last_error_details else "未检测到推文中的视频直链"
+        raise ValueError(f"{err_summary} (请检查推文中是否包含视频，或确认是否已开启网络代理！)")
 
 
 class QueueTask:
@@ -3148,6 +3156,10 @@ class HFDownloaderApp(tk.Tk):
 
         self.btn_tw_fetch.config(state=tk.DISABLED)
         self.lbl_status.config(text="状态: 正在智能解析 Twitter / X 视频元数据与高清直链...", foreground="blue")
+        self.lbl_tw_author.config(text="推文作者: 正在连接网络并解析推文信息...", foreground="#0d6efd")
+        self.lbl_tw_date.config(text="发布日期: 解析中... | 视频时长: 解析中...", foreground="#555555")
+        self.lbl_tw_text.config(text=f"推文内容: 正在解析目标推文视频流直链与清晰度规格 ({raw_url})...", foreground="#333333")
+        
         proxy = self._get_effective_proxy()
         self.log(f"\n[*] 正在解析推文: {raw_url} | 代理: {proxy or '直连'}...")
 
@@ -3165,6 +3177,12 @@ class HFDownloaderApp(tk.Tk):
         except Exception as e:
             self.tw_resolved_data = None
             err_str = str(e)
+            self.after(0, lambda: self.lbl_tw_author.config(text="推文作者: 解析未成功", foreground="#dc3545"))
+            self.after(0, lambda: self.lbl_tw_date.config(text="发布日期: -- | 视频时长: --", foreground="#555555"))
+            self.after(0, lambda: self.lbl_tw_text.config(text=f"推文内容: ❌ 无法解析视频: {err_str}\n\n💡 提示: 请确认推文链接是否有效，或确认是否已开启网络代理 (如 Clash/v2rayN)。", foreground="#dc3545"))
+            self.after(0, lambda: self.tree_tw_variants.delete(*self.tree_tw_variants.get_children()))
+            self.after(0, lambda: self.checked_tw_variants.clear())
+            self.after(0, lambda: self._update_tw_checked_count_label())
             self.after(0, lambda: self.log(f"[✗] 解析 Twitter 视频失败: {err_str}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: Twitter 视频解析失败", foreground="red"))
             self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析推文中的视频:\n{err_str}\n\n建议:\n1. 确认该推文中是否包含视频或动图 GIF；\n2. 检查网络代理客户端 (如 Clash/v2rayN) 是否正常运行并开启全局/规则代理。", parent=self))
@@ -3176,9 +3194,9 @@ class HFDownloaderApp(tk.Tk):
             return
 
         data = self.tw_resolved_data
-        self.lbl_tw_author.config(text=f"推文作者: {data.get('author')} ({data.get('author_id')})")
-        self.lbl_tw_date.config(text=f"发布日期: {data.get('date')} | 视频时长: {data.get('duration')}")
-        self.lbl_tw_text.config(text=f"推文内容: {data.get('text')}")
+        self.lbl_tw_author.config(text=f"推文作者: {data.get('author')} ({data.get('author_id')})", foreground="#0d6efd")
+        self.lbl_tw_date.config(text=f"发布日期: {data.get('date')} | 视频时长: {data.get('duration')}", foreground="#555555")
+        self.lbl_tw_text.config(text=f"推文内容: {data.get('text')}", foreground="#212529")
 
         self.tree_tw_variants.delete(*self.tree_tw_variants.get_children())
         self.checked_tw_variants.clear()

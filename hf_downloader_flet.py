@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import datetime
 from datetime import datetime
 import threading
 import subprocess
@@ -183,7 +184,10 @@ class TwitterMediaResolver:
 
     @staticmethod
     def extract_tweet_id(raw_input: str) -> Optional[str]:
+        if not raw_input:
+            return None
         raw_input = raw_input.strip()
+        # Clean URL query params if status id is followed by ?
         m = re.search(r'status/(\d+)', raw_input)
         if m:
             return m.group(1)
@@ -199,9 +203,10 @@ class TwitterMediaResolver:
         if not tweet_id and "http" not in raw_input:
             raise ValueError("请输入有效的 Twitter / X 推文链接或 Tweet ID！")
 
-        target_url = raw_input if raw_input.startswith("http") else f"https://x.com/i/status/{tweet_id}"
+        target_url = f"https://twitter.com/i/status/{tweet_id}" if tweet_id else raw_input.strip()
+        last_error_details = []
 
-        # Strategy 1: yt-dlp deep resolution (if available)
+        # Strategy 1: yt-dlp deep resolution (Primary engine)
         try:
             import yt_dlp
             ydl_opts = {
@@ -209,6 +214,8 @@ class TwitterMediaResolver:
                 'no_warnings': True,
                 'extract_flat': False,
                 'skip_download': True,
+                'socket_timeout': 15,
+                'nocheckcertificate': True
             }
             if proxy:
                 ydl_opts['proxy'] = proxy
@@ -254,7 +261,7 @@ class TwitterMediaResolver:
                                 q_label = f"🎬 360P 流畅 ({width}x{height})"
                             else:
                                 q_label = f"🎬 {height}P ({width}x{height})"
-                        elif vcodec != 'none' and furl.endswith('.mp4'):
+                        elif vcodec != 'none' and ('.mp4' in furl or furl.endswith('.mp4')):
                             q_label = "🎬 标准 MP4 视频"
                         elif acodec != 'none' and vcodec == 'none':
                             q_label = "🎵 仅提取音频 (Audio Stream)"
@@ -295,8 +302,8 @@ class TwitterMediaResolver:
                             "thumbnail": thumbnail,
                             "variants": video_variants
                         }
-        except Exception:
-            pass
+        except Exception as e_ytdlp:
+            last_error_details.append(f"yt-dlp: {str(e_ytdlp)}")
 
         # Strategy 2: Syndication API fallback (Pure requests)
         if tweet_id:
@@ -357,10 +364,11 @@ class TwitterMediaResolver:
                             "thumbnail": None,
                             "variants": variants_list
                         }
-            except Exception:
-                pass
+            except Exception as e_syn:
+                last_error_details.append(f"Syndication: {str(e_syn)}")
 
-        raise ValueError("未能解析到该推文中的视频，请确认链接是否有效，或确认是否已开启网络代理！")
+        err_summary = "; ".join(last_error_details) if last_error_details else "未检测到推文中的视频直链"
+        raise ValueError(f"{err_summary} (请检查推文中是否包含视频，或确认是否已开启网络代理！)")
 
 
 # Modern Professional Color Palette
@@ -2712,6 +2720,9 @@ def main(page: ft.Page):
 
         btn_tw_fetch.disabled = True
         lbl_global_status.value = "状态: 正在智能解析 Twitter / X 视频元数据与高清直链..."
+        lbl_tw_author.value = "推文作者: 正在连接网络并解析推文信息..."
+        lbl_tw_date.value = "发布日期: 解析中... | 视频时长: 解析中..."
+        lbl_tw_text.value = f"推文内容: 正在解析目标推文视频流直链与清晰度规格 ({raw_url})..."
         log(f"\n[*] 正在解析推文: {raw_url}...")
         page.update()
 
@@ -2737,6 +2748,12 @@ def main(page: ft.Page):
                 refresh_tw_variants_view()
             except Exception as err:
                 raw_tw_data = None
+                checked_tw_indices.clear()
+                lbl_tw_author.value = "推文作者: 解析未成功"
+                lbl_tw_date.value = "发布日期: -- | 视频时长: --"
+                lbl_tw_text.value = f"推文内容: ❌ 无法解析视频: {str(err)}\n\n💡 提示: 请确认推文链接是否有效，或确认是否已开启网络代理 (如 Clash/v2rayN)。"
+                lbl_tw_checked.value = "[已勾选: 0 项规格]"
+                refresh_tw_variants_view()
                 log(f"[✗] 解析 Twitter 视频失败: {str(err)}")
                 show_snack(f"解析失败: {str(err)}", is_error=True)
                 lbl_global_status.value = "状态: Twitter 视频解析失败"
