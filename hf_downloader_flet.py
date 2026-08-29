@@ -1684,12 +1684,63 @@ def main(page: ft.Page):
     btn_stop_q = ft.ElevatedButton("暂停/终止队列", icon=ft.Icons.PAUSE, bgcolor=COLOR_WARNING, color=ft.Colors.WHITE, disabled=True, on_click=stop_queue, height=38)
 
     def open_history_dialog(default_platform: Optional[str] = None):
-        search_tf = ft.TextField(hint_text="搜索仓库名或备注...", prefix_icon=ft.Icons.SEARCH, dense=True, expand=True, height=38)
+        search_tf = ft.TextField(hint_text="搜索仓库名/推文/备注...", prefix_icon=ft.Icons.SEARCH, dense=True, expand=True, height=38)
         col_hist_list = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO, height=360)
+
+        # Dynamic dialog title
+        if default_platform == "huggingface":
+            dialog_title_text = "🤗 Hugging Face 专属历史记录与智能收藏库"
+            default_filter_val = "🤗 Hugging Face 专属"
+            filter_options = [
+                ft.dropdown.Option("🤗 Hugging Face 专属"),
+                ft.dropdown.Option("⭐ 仅看当前收藏"),
+                ft.dropdown.Option("🐙 GitHub"),
+                ft.dropdown.Option("🐦 Twitter / X"),
+                ft.dropdown.Option("🌐 全部历史记录")
+            ]
+        elif default_platform == "github":
+            dialog_title_text = "🐙 GitHub 仓库专属历史记录与智能收藏库"
+            default_filter_val = "🐙 GitHub 专属"
+            filter_options = [
+                ft.dropdown.Option("🐙 GitHub 专属"),
+                ft.dropdown.Option("⭐ 仅看当前收藏"),
+                ft.dropdown.Option("🤗 Hugging Face"),
+                ft.dropdown.Option("🐦 Twitter / X"),
+                ft.dropdown.Option("🌐 全部历史记录")
+            ]
+        elif default_platform == "twitter":
+            dialog_title_text = "🐦 Twitter / X 专属推文解析历史与智能收藏库"
+            default_filter_val = "🐦 Twitter / X 专属"
+            filter_options = [
+                ft.dropdown.Option("🐦 Twitter / X 专属"),
+                ft.dropdown.Option("⭐ 仅看当前收藏"),
+                ft.dropdown.Option("🤗 Hugging Face"),
+                ft.dropdown.Option("🐙 GitHub"),
+                ft.dropdown.Option("🌐 全部历史记录")
+            ]
+        else:
+            dialog_title_text = "🕒 全局历史记录与智能收藏库 (History & Starred Hub)"
+            default_filter_val = "🌐 全部历史记录"
+            filter_options = [
+                ft.dropdown.Option("🌐 全部历史记录"),
+                ft.dropdown.Option("🤗 Hugging Face"),
+                ft.dropdown.Option("🐙 GitHub"),
+                ft.dropdown.Option("🐦 Twitter / X"),
+                ft.dropdown.Option("⭐ 全部收藏")
+            ]
+
+        dd_filter_scope = ft.Dropdown(
+            options=filter_options,
+            value=default_filter_val,
+            dense=True,
+            width=210,
+            height=38
+        )
 
         def refresh_hist_modal(filter_txt=""):
             records = HistoryManager.load_history()
             col_hist_list.controls.clear()
+            scope = dd_filter_scope.value or "🌐 全部历史记录"
             
             for r in records:
                 rid = r.get("repo_id", "")
@@ -1699,6 +1750,20 @@ def main(page: ft.Page):
                 branch = r.get("branch", "main")
                 fcount = r.get("file_count", 0)
                 t_str = r.get("last_accessed", "--")
+
+                # Platform filtering
+                if "Hugging Face" in scope and plat != "huggingface":
+                    continue
+                elif "GitHub" in scope and plat != "github":
+                    continue
+                elif "Twitter" in scope and plat != "twitter":
+                    continue
+                elif scope == "⭐ 仅看当前收藏":
+                    target_p = default_platform or "huggingface"
+                    if plat != target_p or not is_star:
+                        continue
+                elif scope == "⭐ 全部收藏" and not is_star:
+                    continue
 
                 if filter_txt:
                     if filter_txt.lower() not in rid.lower() and filter_txt.lower() not in note.lower():
@@ -1737,8 +1802,22 @@ def main(page: ft.Page):
                         refresh_hist_modal(search_tf.value)
                     return _del
 
-                plat_icon = ft.Icons.AUTO_AWESOME if plat == "huggingface" else ft.Icons.CODE
-                plat_label = "🤗 HF" if plat == "huggingface" else "🐙 GitHub"
+                if plat == "huggingface":
+                    plat_label = "🤗 HF"
+                    plat_color = COLOR_ACCENT
+                    desc_str = f"分支: {branch} | {fcount} 文件 | 访问: {t_str}"
+                elif plat == "github":
+                    plat_label = "🐙 GitHub"
+                    plat_color = COLOR_SUCCESS
+                    desc_str = f"分支: {branch} | {fcount} 文件/Release | 访问: {t_str}"
+                elif plat == "twitter":
+                    plat_label = "🐦 Twitter"
+                    plat_color = "#0284c7"
+                    desc_str = f"推文ID: {branch} | {fcount} 个画质规格 | 解析: {t_str}"
+                else:
+                    plat_label = plat
+                    plat_color = COLOR_ACCENT
+                    desc_str = f"访问: {t_str}"
 
                 row_card = ft.Container(
                     content=ft.Row([
@@ -1750,13 +1829,13 @@ def main(page: ft.Page):
                         ),
                         ft.Container(
                             content=ft.Text(plat_label, size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
-                            bgcolor=COLOR_ACCENT if plat == "huggingface" else COLOR_SUCCESS,
+                            bgcolor=plat_color,
                             border_radius=4,
                             padding=ft.Padding.symmetric(horizontal=6, vertical=2)
                         ),
                         ft.Column([
                             ft.Text(rid, weight=ft.FontWeight.BOLD, size=13),
-                            ft.Text(f"分支: {branch} | {fcount} 文件 | 访问: {t_str}" + (f" | 备注: {note}" if note else ""), size=11, color=COLOR_TEXT_SECONDARY)
+                            ft.Text(desc_str + (f" | 备注: {note}" if note else ""), size=11, color=COLOR_TEXT_SECONDARY)
                         ], expand=True, spacing=2),
                         ft.ElevatedButton("载入", icon=ft.Icons.ARROW_FORWARD, on_click=make_load_action(), height=32),
                         ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, icon_color=COLOR_DANGER, on_click=make_del(), tooltip="删除记录")
@@ -1775,18 +1854,19 @@ def main(page: ft.Page):
             page.update()
 
         search_tf.on_change = lambda e: refresh_hist_modal(search_tf.value)
+        dd_filter_scope.on_change = lambda e: refresh_hist_modal(search_tf.value)
 
         dlg_hist = ft.AlertDialog(
-            title=ft.Text("🕒 仓库历史记录与智能收藏库 (History & Starred Hub)", weight=ft.FontWeight.BOLD),
+            title=ft.Text(dialog_title_text, weight=ft.FontWeight.BOLD),
             content=ft.Container(
                 content=ft.Column([
-                    ft.Row([search_tf]),
+                    ft.Row([search_tf, dd_filter_scope], spacing=8),
                     col_hist_list
                 ], spacing=8),
-                width=720, height=440
+                width=760, height=440
             ),
             actions=[
-                ft.TextButton("清空历史", on_click=lambda e: (HistoryManager.clear_all(), refresh_hist_modal())),
+                ft.TextButton("清空全部历史", on_click=lambda e: (HistoryManager.clear_all(), refresh_hist_modal())),
                 ft.ElevatedButton("关闭", on_click=lambda e: (setattr(dlg_hist, 'open', False), page.update()))
             ]
         )

@@ -919,17 +919,26 @@ class HistoryManagerDialog(tk.Toplevel):
     
     def __init__(self, parent, on_load_callback, default_platform: Optional[str] = None):
         super().__init__(parent)
-        self.title("🕒 仓库历史记录与智能收藏库 (History & Starred Hub)")
-        self.geometry("860x540")
-        self.minsize(720, 420)
-        self.transient(parent)
-        self.grab_set()
-
         self.on_load_callback = on_load_callback
         self.default_platform = default_platform
         self.records: List[Dict[str, Any]] = HistoryManager.load_history()
 
-        center_window_on_parent(self, parent, 860, 540)
+        # Dynamic title based on active tab
+        if default_platform == "huggingface":
+            self.title("🤗 Hugging Face 专属历史记录与智能收藏库")
+        elif default_platform == "github":
+            self.title("🐙 GitHub 仓库专属历史记录与智能收藏库")
+        elif default_platform == "twitter":
+            self.title("🐦 Twitter / X 专属推文解析历史与智能收藏库")
+        else:
+            self.title("🕒 全局历史记录与智能收藏库 (History & Starred Hub)")
+
+        self.geometry("880x540")
+        self.minsize(740, 420)
+        self.transient(parent)
+        self.grab_set()
+
+        center_window_on_parent(self, parent, 880, 540)
 
         self._build_ui()
         self._filter_and_render()
@@ -945,22 +954,30 @@ class HistoryManagerDialog(tk.Toplevel):
         ttk.Label(top_bar, text="🔍 搜索历史:", font=FONT_BOLD).pack(side=tk.LEFT, padx=(0, 4))
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *args: self._filter_and_render())
-        search_entry = ttk.Entry(top_bar, textvariable=self.search_var, width=28, font=FONT_NORMAL)
+        search_entry = ttk.Entry(top_bar, textvariable=self.search_var, width=24, font=FONT_NORMAL)
         search_entry.pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Label(top_bar, text="平台筛选:", font=FONT_BOLD).pack(side=tk.LEFT, padx=(0, 4))
-        self.filter_platform_var = tk.StringVar(value="全部历史")
-        platform_options = ["全部历史", "🤗 Hugging Face", "🐙 GitHub", "⭐ 仅看收藏"]
+        ttk.Label(top_bar, text="视图范围:", font=FONT_BOLD).pack(side=tk.LEFT, padx=(0, 4))
+        
+        # Dedicated platform filter options
         if self.default_platform == "huggingface":
-            self.filter_platform_var.set("🤗 Hugging Face")
+            platform_options = ["🤗 Hugging Face 专属", "⭐ 仅看当前收藏", "🐙 GitHub", "🐦 Twitter / X", "🌐 全部历史记录"]
+            self.filter_platform_var = tk.StringVar(value="🤗 Hugging Face 专属")
         elif self.default_platform == "github":
-            self.filter_platform_var.set("🐙 GitHub")
+            platform_options = ["🐙 GitHub 专属", "⭐ 仅看当前收藏", "🤗 Hugging Face", "🐦 Twitter / X", "🌐 全部历史记录"]
+            self.filter_platform_var = tk.StringVar(value="🐙 GitHub 专属")
+        elif self.default_platform == "twitter":
+            platform_options = ["🐦 Twitter / X 专属", "⭐ 仅看当前收藏", "🤗 Hugging Face", "🐙 GitHub", "🌐 全部历史记录"]
+            self.filter_platform_var = tk.StringVar(value="🐦 Twitter / X 专属")
+        else:
+            platform_options = ["🌐 全部历史记录", "🤗 Hugging Face", "🐙 GitHub", "🐦 Twitter / X", "⭐ 仅看收藏"]
+            self.filter_platform_var = tk.StringVar(value="🌐 全部历史记录")
 
         filter_combo = ttk.Combobox(
             top_bar, 
             textvariable=self.filter_platform_var, 
             values=platform_options, 
-            width=16, 
+            width=20, 
             state="readonly", 
             font=FONT_NORMAL
         )
@@ -979,23 +996,24 @@ class HistoryManagerDialog(tk.Toplevel):
         
         self.tree.heading("star", text="⭐ 收藏", anchor=tk.CENTER)
         self.tree.heading("platform", text="平台", anchor=tk.CENTER)
-        self.tree.heading("repo_id", text="仓库 ID / 项目名称", anchor=tk.W)
-        self.tree.heading("branch", text="分支/Tag", anchor=tk.CENTER)
-        self.tree.heading("file_count", text="文件数", anchor=tk.CENTER)
+        self.tree.heading("repo_id", text="仓库 ID / 推文项目", anchor=tk.W)
+        self.tree.heading("branch", text="分支/ID", anchor=tk.CENTER)
+        self.tree.heading("file_count", text="资源数", anchor=tk.CENTER)
         self.tree.heading("time", text="最后访问时间", anchor=tk.CENTER)
         self.tree.heading("note", text="自定义备注 (双击编辑)", anchor=tk.W)
 
         self.tree.column("star", width=65, minwidth=55, stretch=False, anchor=tk.CENTER)
         self.tree.column("platform", width=120, minwidth=100, stretch=False, anchor=tk.CENTER)
-        self.tree.column("repo_id", width=250, minwidth=180, stretch=True, anchor=tk.W)
-        self.tree.column("branch", width=80, minwidth=70, stretch=False, anchor=tk.CENTER)
-        self.tree.column("file_count", width=75, minwidth=65, stretch=False, anchor=tk.CENTER)
+        self.tree.column("repo_id", width=260, minwidth=180, stretch=True, anchor=tk.W)
+        self.tree.column("branch", width=85, minwidth=70, stretch=False, anchor=tk.CENTER)
+        self.tree.column("file_count", width=80, minwidth=65, stretch=False, anchor=tk.CENTER)
         self.tree.column("time", width=130, minwidth=120, stretch=False, anchor=tk.CENTER)
         self.tree.column("note", width=180, minwidth=120, stretch=True, anchor=tk.W)
 
         self.tree.tag_configure("starred_tag", background="#fff8e1")
         self.tree.tag_configure("hf_tag", foreground="#0d6efd")
         self.tree.tag_configure("gh_tag", foreground="#198754")
+        self.tree.tag_configure("tw_tag", foreground="#0284c7")
 
         scroll_y = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
         scroll_x = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
@@ -1015,7 +1033,7 @@ class HistoryManagerDialog(tk.Toplevel):
 
         btn_load = tk.Button(
             action_bar,
-            text="🚀 载入并检索选中仓库",
+            text="🚀 载入并检索选中项目",
             font=FONT_BOLD,
             bg="#0d6efd",
             fg="#ffffff",
@@ -1035,7 +1053,7 @@ class HistoryManagerDialog(tk.Toplevel):
         btn_del = ttk.Button(action_bar, text="🗑️ 删除记录", command=self.delete_selected)
         btn_del.pack(side=tk.LEFT, padx=4)
 
-        btn_clear = ttk.Button(action_bar, text="🧹 清空历史", command=self.clear_all_history)
+        btn_clear = ttk.Button(action_bar, text="🧹 清空当前历史", command=self.clear_all_history)
         btn_clear.pack(side=tk.LEFT, padx=6)
 
         btn_close = ttk.Button(action_bar, text="关闭窗口", command=self.destroy)
@@ -1048,12 +1066,20 @@ class HistoryManagerDialog(tk.Toplevel):
 
         filtered = []
         for r in self.records:
+            plat = r.get("platform", "")
+            
             # Platform filtering
-            if platform_filter == "🤗 Hugging Face" and r.get("platform") != "huggingface":
+            if "Hugging Face" in platform_filter and plat != "huggingface":
                 continue
-            elif platform_filter == "🐙 GitHub" and r.get("platform") != "github":
+            elif "GitHub" in platform_filter and plat != "github":
                 continue
-            elif platform_filter == "⭐ 仅看收藏" and not r.get("is_starred", False):
+            elif "Twitter" in platform_filter and plat != "twitter":
+                continue
+            elif platform_filter == "⭐ 仅看当前收藏":
+                target_plat = self.default_platform or "huggingface"
+                if plat != target_plat or not r.get("is_starred", False):
+                    continue
+            elif platform_filter == "⭐ 全部收藏" and not r.get("is_starred", False):
                 continue
 
             # Search keyword matching
@@ -1066,26 +1092,46 @@ class HistoryManagerDialog(tk.Toplevel):
 
             filtered.append(r)
 
+        # Dynamic Headings based on active filter
+        if "Twitter" in platform_filter:
+            self.tree.heading("repo_id", text="推文作者 / Tweet ID")
+            self.tree.heading("branch", text="推文 ID")
+            self.tree.heading("file_count", text="视频画质数")
+        else:
+            self.tree.heading("repo_id", text="仓库 ID / 项目名称")
+            self.tree.heading("branch", text="分支/Tag")
+            self.tree.heading("file_count", text="文件数")
+
         self.tree.delete(*self.tree.get_children())
         for i, item in enumerate(filtered):
             is_starred = item.get("is_starred", False)
             star_sym = "⭐ 收藏" if is_starred else "☆"
-            plat = "🤗 HuggingFace" if item.get("platform") == "huggingface" else "🐙 GitHub"
+            plat_raw = item.get("platform", "")
+            
+            if plat_raw == "huggingface":
+                plat_disp = "🤗 HuggingFace"
+                tag_plat = "hf_tag"
+            elif plat_raw == "github":
+                plat_disp = "🐙 GitHub"
+                tag_plat = "gh_tag"
+            elif plat_raw == "twitter":
+                plat_disp = "🐦 Twitter/X"
+                tag_plat = "tw_tag"
+            else:
+                plat_disp = plat_raw
+                tag_plat = "hf_tag"
+
             f_count = f"{item.get('file_count', 0)} 项" if item.get("file_count") else "--"
             
-            tags = []
+            tags = [tag_plat]
             if is_starred:
                 tags.append("starred_tag")
-            if item.get("platform") == "huggingface":
-                tags.append("hf_tag")
-            else:
-                tags.append("gh_tag")
 
             self.tree.insert(
                 "", tk.END, iid=str(i),
                 values=(
                     star_sym,
-                    plat,
+                    plat_disp,
                     item.get("repo_id", ""),
                     item.get("branch", "main"),
                     f_count,
@@ -1802,6 +1848,8 @@ class HFDownloaderApp(tk.Tk):
             self.repo_combo["values"] = HistoryManager.get_recent_repos("huggingface")
         if hasattr(self, "gh_repo_combo"):
             self.gh_repo_combo["values"] = HistoryManager.get_recent_repos("github")
+        if hasattr(self, "tw_url_combo"):
+            self.tw_url_combo["values"] = HistoryManager.get_recent_repos("twitter")
 
     def open_env_setup(self):
         self.notebook.select(4)
@@ -2966,10 +3014,11 @@ class HFDownloaderApp(tk.Tk):
         url_box.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
 
         self.tw_url_var = tk.StringVar(value=getattr(self, "saved_tw_url", ""))
-        self.tw_url_entry = ttk.Entry(url_box, textvariable=self.tw_url_var, font=FONT_NORMAL)
-        self.tw_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.tw_url_entry.bind("<FocusOut>", lambda e: self._save_settings())
-        self.tw_url_entry.bind("<Return>", lambda e: self.start_resolve_twitter())
+        self.tw_url_combo = ttk.Combobox(url_box, textvariable=self.tw_url_var, values=HistoryManager.get_recent_repos("twitter"), font=FONT_NORMAL)
+        self.tw_url_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.tw_url_combo.bind("<FocusOut>", lambda e: self._save_settings())
+        self.tw_url_combo.bind("<Return>", lambda e: self.start_resolve_twitter())
+        self.tw_url_combo.bind("<<ComboboxSelected>>", lambda e: self.start_resolve_twitter())
 
         btn_paste = ttk.Button(url_box, text=" 粘贴", image=self.icons["bolt"], compound=tk.LEFT, width=7, command=self._paste_twitter_url)
         btn_paste.pack(side=tk.RIGHT, padx=(4, 0))
@@ -2980,7 +3029,7 @@ class HFDownloaderApp(tk.Tk):
         btn_tw_hist = ttk.Button(tw_config_frame, text=" 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("twitter"))
         btn_tw_hist.grid(row=0, column=3, padx=4, pady=3)
 
-        ToolTip(self.tw_url_entry, "输入任意 Twitter / X 推文链接 (例如 https://x.com/user/status/123456789) 或纯推文 ID")
+        ToolTip(self.tw_url_combo, "输入任意 Twitter / X 推文链接 (例如 https://x.com/user/status/123456789) 或纯推文 ID (可下拉选择历史记录)")
 
         # Row 1: Proxy Settings
         ttk.Label(tw_config_frame, text="网络代理 (Proxy):").grid(row=1, column=0, sticky=tk.W, padx=4, pady=3)
