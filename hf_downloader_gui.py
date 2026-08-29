@@ -68,7 +68,8 @@ CORE_PACKAGES = [
     ("requests", "网络通信与大文件流式断点续传引擎"),
     ("PySocks", "SOCKS5 / SOCKS4 高级代理协议支持"),
     ("tqdm", "高精度终端与图形下载进度指示器"),
-    ("certifi", "Mozilla CA 根证书集 (保障 SSL/TLS 下载安全)")
+    ("certifi", "Mozilla CA 根证书集 (保障 SSL/TLS 下载安全)"),
+    ("yt_dlp", "Twitter / X / 社交媒体流媒体高清音视频解析引擎")
 ]
 
 # Global Font Settings (Enlarged and Clear)
@@ -267,6 +268,14 @@ class ColorIconFactory:
         d = ImageDraw.Draw(img_star)
         d.polygon([(9, 1), (11, 6), (17, 7), (12, 11), (14, 17), (9, 13), (4, 17), (6, 11), (1, 7), (7, 6)], fill="#f59e0b", outline="#d97706")
         icons_pil["star"] = img_star
+
+        # 14. Twitter / X Bird Icon (Sky Blue Emblem with X/Bird styling)
+        img_tw = Image.new("RGBA", (18, 18), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img_tw)
+        d.ellipse([1, 1, 16, 16], fill="#1d9bf0")
+        d.line([5, 5, 13, 13], fill="#ffffff", width=2)
+        d.line([13, 5, 5, 13], fill="#ffffff", width=2)
+        icons_pil["twitter"] = img_tw
 
         # Convert all to ImageTk.PhotoImage
         icons_tk = {}
@@ -1244,6 +1253,193 @@ class DeleteConfirmDialog(tk.Toplevel):
         self.destroy()
 
 
+import re
+
+class TwitterMediaResolver:
+    """High-reliability multi-engine parser for Twitter / X media."""
+
+    @staticmethod
+    def extract_tweet_id(raw_input: str) -> Optional[str]:
+        raw_input = raw_input.strip()
+        m = re.search(r'status/(\d+)', raw_input)
+        if m:
+            return m.group(1)
+        m = re.search(r'^\d+$', raw_input)
+        if m:
+            return m.group(0)
+        return None
+
+    @classmethod
+    def resolve(cls, raw_input: str, proxy: Optional[str] = None) -> Dict[str, Any]:
+        """Resolves tweet media information with multiple fallback strategies."""
+        tweet_id = cls.extract_tweet_id(raw_input)
+        if not tweet_id and "http" not in raw_input:
+            raise ValueError("请输入有效的 Twitter / X 推文链接或 Tweet ID！")
+
+        target_url = raw_input if raw_input.startswith("http") else f"https://x.com/i/status/{tweet_id}"
+
+        # Strategy 1: yt-dlp deep resolution (if available)
+        try:
+            import yt_dlp
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'skip_download': True,
+            }
+            if proxy:
+                ydl_opts['proxy'] = proxy
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target_url, download=False)
+                if info:
+                    title = info.get('description') or info.get('title') or f"Tweet {tweet_id or ''}"
+                    uploader = info.get('uploader') or info.get('channel') or "Twitter 用户"
+                    uploader_id = info.get('uploader_id') or info.get('channel_id') or ""
+                    thumbnail = info.get('thumbnail')
+                    upload_date = info.get('upload_date')
+                    if upload_date and len(upload_date) == 8:
+                        upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+                    else:
+                        upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+                    formats = info.get('formats', [])
+                    video_variants = []
+                    seen_urls = set()
+
+                    for f in formats:
+                        furl = f.get('url')
+                        if not furl or furl in seen_urls:
+                            continue
+                        seen_urls.add(furl)
+
+                        vcodec = f.get('vcodec')
+                        acodec = f.get('acodec')
+                        width = f.get('width')
+                        height = f.get('height')
+                        filesize = f.get('filesize') or f.get('filesize_approx')
+                        tbr = f.get('tbr') or f.get('vbr') or 0
+
+                        if height:
+                            if height >= 1080:
+                                q_label = f"🎬 1080P 超清 ({width}x{height})"
+                            elif height >= 720:
+                                q_label = f"🎬 720P 高清 ({width}x{height})"
+                            elif height >= 480:
+                                q_label = f"🎬 480P 标清 ({width}x{height})"
+                            elif height >= 360:
+                                q_label = f"🎬 360P 流畅 ({width}x{height})"
+                            else:
+                                q_label = f"🎬 {height}P ({width}x{height})"
+                        elif vcodec != 'none' and furl.endswith('.mp4'):
+                            q_label = "🎬 标准 MP4 视频"
+                        elif acodec != 'none' and vcodec == 'none':
+                            q_label = "🎵 仅提取音频 (Audio Stream)"
+                        else:
+                            continue
+
+                        size_str = "--"
+                        if filesize:
+                            size_str = f"{filesize / (1024*1024):.2f} MB" if filesize >= 1024*1024 else f"{filesize/1024:.1f} KB"
+                        elif tbr and info.get('duration'):
+                            est = (tbr * 1000 / 8) * info.get('duration')
+                            size_str = f"~{est / (1024*1024):.1f} MB"
+
+                        bitrate_str = f"{int(tbr)} kbps" if tbr else "--"
+                        clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"{uploader_id or 'twitter'}_{tweet_id or info.get('id')}_{height or 'video'}.mp4")
+
+                        video_variants.append({
+                            "quality": q_label,
+                            "height": height or 0,
+                            "bitrate": tbr or 0,
+                            "bitrate_str": bitrate_str,
+                            "size_str": size_str,
+                            "raw_size": filesize or 0,
+                            "url": furl,
+                            "filename": clean_fn
+                        })
+
+                    video_variants.sort(key=lambda x: (x["height"], x["bitrate"]), reverse=True)
+
+                    if video_variants:
+                        return {
+                            "tweet_id": tweet_id or str(info.get('id')),
+                            "author": uploader,
+                            "author_id": f"@{uploader_id}" if uploader_id else "",
+                            "text": title.strip(),
+                            "date": upload_date,
+                            "duration": info.get('duration_string') or "--",
+                            "thumbnail": thumbnail,
+                            "variants": video_variants
+                        }
+        except Exception:
+            pass
+
+        # Strategy 2: Syndication API fallback (Pure requests)
+        if tweet_id:
+            try:
+                api_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&lang=en"
+                proxies = {"http": proxy, "https": proxy} if proxy else None
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json"
+                }
+                resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=12)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    user = data.get("user", {})
+                    author = user.get("name", "Twitter 用户")
+                    author_id = f"@{user.get('screen_name', '')}"
+                    text = data.get("text", "")
+                    raw_created = data.get("created_at")
+                    pub_date = raw_created[:16].replace("T", " ") if raw_created else datetime.now().strftime("%Y-%m-%d %H:%M")
+
+                    media_list = data.get("mediaDetails", [])
+                    variants_list = []
+                    for m in media_list:
+                        v_info = m.get("video_info", {})
+                        for var in v_info.get("variants", []):
+                            if var.get("content_type") == "video/mp4":
+                                br = var.get("bitrate", 0)
+                                furl = var.get("url")
+                                m_res = re.search(r'/(\d+)x(\d+)/', furl)
+                                if m_res:
+                                    w, h = int(m_res.group(1)), int(m_res.group(2))
+                                    h_min = min(w, h)
+                                    q_label = f"🎬 {h_min}P 高清 ({w}x{h})"
+                                else:
+                                    q_label = f"🎬 MP4 视频 ({br // 1000} kbps)"
+                                
+                                clean_fn = f"twitter_{user.get('screen_name', 'video')}_{tweet_id}_{br}.mp4"
+                                variants_list.append({
+                                    "quality": q_label,
+                                    "height": br,
+                                    "bitrate": br // 1000,
+                                    "bitrate_str": f"{br // 1000} kbps",
+                                    "size_str": "--",
+                                    "raw_size": 0,
+                                    "url": furl,
+                                    "filename": clean_fn
+                                })
+
+                    variants_list.sort(key=lambda x: x["bitrate"], reverse=True)
+                    if variants_list:
+                        return {
+                            "tweet_id": tweet_id,
+                            "author": author,
+                            "author_id": author_id,
+                            "text": text,
+                            "date": pub_date,
+                            "duration": "--",
+                            "thumbnail": None,
+                            "variants": variants_list
+                        }
+            except Exception:
+                pass
+
+        raise ValueError("未能解析到该推文中的视频，请确认链接是否有效，或确认是否已开启网络代理！")
+
+
 class QueueTask:
     def __init__(self, task_id: int, repo_id: str, repo_type: str, branch: str, 
                  file_path: str, size_str: str, date_str: str, dest_dir: str, flatten: bool, 
@@ -1453,6 +1649,7 @@ class HFDownloaderApp(tk.Tk):
                     self.saved_proxy = data.get("proxy", "")
                     self.saved_token = data.get("token", "")
                     self.saved_gh_token = data.get("gh_token", "")
+                    self.saved_tw_url = data.get("tw_url", "")
             except Exception:
                 pass
 
@@ -1460,11 +1657,13 @@ class HFDownloaderApp(tk.Tk):
         try:
             token_val = self.token_var.get().strip() if hasattr(self, "token_var") else self.saved_token
             gh_token_val = self.gh_token_var.get().strip() if hasattr(self, "gh_token_var") else self.saved_gh_token
+            tw_url_val = self.tw_url_var.get().strip() if hasattr(self, "tw_url_var") else getattr(self, "saved_tw_url", "")
             with open(APP_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump({
                     "proxy": self._get_effective_proxy() if hasattr(self, "proxy_var") else self.saved_proxy,
                     "token": token_val,
-                    "gh_token": gh_token_val
+                    "gh_token": gh_token_val,
+                    "tw_url": tw_url_val
                 }, f, ensure_ascii=False, indent=2)
             if token_val:
                 os.environ["HF_TOKEN"] = token_val
@@ -1553,6 +1752,8 @@ class HFDownloaderApp(tk.Tk):
         self.proxy_combo["values"] = self.proxies_list
         if hasattr(self, "gh_proxy_combo"):
             self.gh_proxy_combo["values"] = self.proxies_list
+        if hasattr(self, "tw_proxy_combo"):
+            self.tw_proxy_combo["values"] = self.proxies_list
         if selected:
             self.proxy_var.set(selected)
         elif self.proxy_var.get() not in self.proxies_list and self.proxies_list:
@@ -1572,6 +1773,13 @@ class HFDownloaderApp(tk.Tk):
                 self.gh_branch_var.set(branch)
             self._on_gh_preset_changed()
             self.start_fetch_github()
+        elif platform == "twitter":
+            self.notebook.select(2)
+            if "status/" in repo_id or repo_id.isdigit():
+                self.tw_url_var.set(repo_id if repo_id.startswith("http") else f"https://x.com/i/status/{repo_id}")
+            else:
+                self.tw_url_var.set(repo_id)
+            self.start_resolve_twitter()
         else:
             self.notebook.select(0)
             self.repo_id_var.set(repo_id)
@@ -1588,7 +1796,7 @@ class HFDownloaderApp(tk.Tk):
             self.gh_repo_combo["values"] = HistoryManager.get_recent_repos("github")
 
     def open_env_setup(self):
-        self.notebook.select(3)
+        self.notebook.select(4)
         self._check_tab_env_status()
         self._refresh_tab_env_dirs()
 
@@ -1665,16 +1873,21 @@ class HFDownloaderApp(tk.Tk):
         self.tab_github = ttk.Frame(self.notebook, padding="6")
         self.notebook.add(self.tab_github, text=" 🐙 GitHub 资源浏览器 ")
 
-        # Tab 3: Download Queue
+        # Tab 3: Twitter / X Video Downloader
+        self.tab_twitter = ttk.Frame(self.notebook, padding="6")
+        self.notebook.add(self.tab_twitter, text=" 🐦 Twitter / X 视频 ")
+
+        # Tab 4: Download Queue
         self.tab_queue = ttk.Frame(self.notebook, padding="6")
         self.notebook.add(self.tab_queue, text=" 📑 统一下载队列 (0) ")
 
-        # Tab 4: Environment Setup & Directory Manager
+        # Tab 5: Environment Setup & Directory Manager
         self.tab_env = ttk.Frame(self.notebook, padding="6")
         self.notebook.add(self.tab_env, text=" 🛠️ 一键部署环境 ")
 
         self._build_tab_browse()
         self._build_tab_github()
+        self._build_tab_twitter()
         self._build_tab_queue()
         self._build_tab_env()
         self._build_bottom_panel(main_frame)
@@ -2666,7 +2879,7 @@ class HFDownloaderApp(tk.Tk):
         messagebox.showinfo("入队成功", f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！\n所有文件将集中保存在独立目录:\n{dest_dir}", parent=self)
 
         if jump or True:  # Jump to queue tab to show user the newly added tasks immediately
-            self.notebook.select(2)
+            self.notebook.select(3)
 
     def download_github_repo_zip(self):
         repo_id = self.gh_repo_var.get().strip()
@@ -2721,13 +2934,415 @@ class HFDownloaderApp(tk.Tk):
         task.check_local_status()
         self.tasks.append(task)
         self._save_tasks()
-        self.rescan_all_tasks(silent=True)
-        self._refresh_queue_tree()
         self.log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name} (下载后将自动解压并收纳在: {dest_dir})")
         messagebox.showinfo("入队成功", f"已将 GitHub 整包源码 Zip 任务加入队列:\n{zip_name}\n保存与解压目标目录: {dest_dir}", parent=self)
-        self.notebook.select(2)
+        self.notebook.select(3)
 
-    # ------------------ Tab 3: Download Queue UI with Checkboxes ------------------
+    # ------------------ Tab 3: Twitter / X Video Downloader UI & Handlers ------------------
+    def _build_tab_twitter(self):
+        self.tw_paned_v = ttk.PanedWindow(self.tab_twitter, orient=tk.VERTICAL)
+        self.tw_paned_v.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        # Upper Area: Config Panel & Tweet Summary Card
+        tw_upper = ttk.Frame(self.tw_paned_v)
+        self.tw_paned_v.add(tw_upper, weight=1)
+
+        # Panel 1: Twitter Configuration
+        tw_config_frame = ttk.LabelFrame(tw_upper, text=" 🐦 Twitter / X 视频解析与网络加速配置 ", padding="6")
+        tw_config_frame.pack(fill=tk.X, pady=(0, 4))
+
+        # Row 0: Tweet URL, Paste button, Parse button, History button
+        ttk.Label(tw_config_frame, text="推文链接 (Tweet URL):").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
+        
+        url_box = ttk.Frame(tw_config_frame)
+        url_box.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
+
+        self.tw_url_var = tk.StringVar(value=getattr(self, "saved_tw_url", ""))
+        self.tw_url_entry = ttk.Entry(url_box, textvariable=self.tw_url_var, font=FONT_NORMAL)
+        self.tw_url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.tw_url_entry.bind("<FocusOut>", lambda e: self._save_settings())
+        self.tw_url_entry.bind("<Return>", lambda e: self.start_resolve_twitter())
+
+        btn_paste = ttk.Button(url_box, text=" 粘贴", image=self.icons["bolt"], compound=tk.LEFT, width=7, command=self._paste_twitter_url)
+        btn_paste.pack(side=tk.RIGHT, padx=(4, 0))
+
+        self.btn_tw_fetch = ttk.Button(tw_config_frame, text=" ⚡ 开始解析视频", image=self.icons["search"], compound=tk.LEFT, command=self.start_resolve_twitter)
+        self.btn_tw_fetch.grid(row=0, column=2, padx=4, pady=3)
+
+        btn_tw_hist = ttk.Button(tw_config_frame, text=" 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("twitter"))
+        btn_tw_hist.grid(row=0, column=3, padx=4, pady=3)
+
+        ToolTip(self.tw_url_entry, "输入任意 Twitter / X 推文链接 (例如 https://x.com/user/status/123456789) 或纯推文 ID")
+
+        # Row 1: Proxy Settings
+        ttk.Label(tw_config_frame, text="网络代理 (Proxy):").grid(row=1, column=0, sticky=tk.W, padx=4, pady=3)
+
+        tw_proxy_subframe = ttk.Frame(tw_config_frame)
+        tw_proxy_subframe.grid(row=1, column=1, sticky=tk.EW, padx=4, pady=3)
+
+        self.tw_proxy_combo = ttk.Combobox(tw_proxy_subframe, textvariable=self.proxy_var, values=self.proxies_list, state="readonly", font=FONT_NORMAL)
+        self.tw_proxy_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.tw_proxy_combo.bind("<<ComboboxSelected>>", lambda e: self._save_settings())
+
+        btn_tw_manage_proxy = ttk.Button(tw_proxy_subframe, text=" 增删管理代理...", image=self.icons["shield"], compound=tk.LEFT, width=14, command=self.open_proxy_manager)
+        btn_tw_manage_proxy.pack(side=tk.RIGHT, padx=(4, 0))
+
+        btn_tw_test_proxy = ttk.Button(tw_config_frame, text=" ⚡ 检测连通性", image=self.icons["bolt"], compound=tk.LEFT, command=self.test_proxy_connectivity)
+        btn_tw_test_proxy.grid(row=1, column=2, padx=4, pady=3)
+
+        tw_config_frame.columnconfigure(1, weight=1)
+
+        # Panel 2: Save Destination
+        tw_dest_frame = ttk.LabelFrame(tw_upper, text=" 💾 视频保存目标目录 ", padding="6")
+        tw_dest_frame.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(tw_dest_frame, text="常用预设分类:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
+        tw_preset_names = list(PRESET_DIRS_MAP.keys())
+        self.tw_preset_var = tk.StringVar(value=tw_preset_names[0])
+        self.tw_preset_combo = ttk.Combobox(
+            tw_dest_frame, 
+            textvariable=self.tw_preset_var, 
+            values=tw_preset_names, 
+            state="readonly", 
+            width=29, 
+            font=FONT_BOLD
+        )
+        self.tw_preset_combo.grid(row=0, column=1, sticky=tk.W, padx=4, pady=3)
+        self.tw_preset_combo.bind("<<ComboboxSelected>>", self._on_tw_preset_changed)
+
+        ttk.Label(tw_dest_frame, text="完整路径:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=3)
+        self.tw_dest_path_var = tk.StringVar(value=PRESET_DIRS_MAP[tw_preset_names[0]])
+        self.tw_dest_entry = ttk.Entry(tw_dest_frame, textvariable=self.tw_dest_path_var, font=FONT_NORMAL)
+        self.tw_dest_entry.grid(row=0, column=3, sticky=tk.EW, padx=4, pady=3)
+
+        btn_tw_browse = ttk.Button(tw_dest_frame, text=" 浏览更改...", image=self.icons["folder"], compound=tk.LEFT, command=self.browse_tw_dest_path)
+        btn_tw_browse.grid(row=0, column=4, padx=4, pady=3)
+
+        tw_dest_frame.columnconfigure(3, weight=1)
+
+        # Panel 3: Tweet & Video Meta Summary Card
+        self.tw_meta_frame = ttk.LabelFrame(tw_upper, text=" 📝 推文与视频信息摘要 ", padding="6")
+        self.tw_meta_frame.pack(fill=tk.X, pady=(0, 4))
+
+        self.lbl_tw_author = ttk.Label(self.tw_meta_frame, text="推文作者: --", font=FONT_BOLD, foreground="#0d6efd")
+        self.lbl_tw_author.pack(anchor=tk.W, pady=(0, 2))
+
+        self.lbl_tw_date = ttk.Label(self.tw_meta_frame, text="发布日期: -- | 视频时长: --", font=FONT_SMALL, foreground="#555555")
+        self.lbl_tw_date.pack(anchor=tk.W, pady=(0, 2))
+
+        self.lbl_tw_text = ttk.Label(self.tw_meta_frame, text="推文内容: (请在上方面板输入推文链接并点击【开始解析视频】)", font=FONT_NORMAL, wraplength=950, justify=tk.LEFT)
+        self.lbl_tw_text.pack(anchor=tk.W)
+
+        # Lower Area: Video Quality Variants Table & Operations
+        tw_lower = ttk.Frame(self.tw_paned_v)
+        self.tw_paned_v.add(tw_lower, weight=3)
+
+        tw_toolbar = ttk.Frame(tw_lower)
+        tw_toolbar.pack(fill=tk.X, pady=(0, 4))
+
+        self.lbl_tw_checked_count = ttk.Label(tw_toolbar, text="[已勾选: 0 项规格]", foreground="#198754", font=FONT_BOLD)
+        self.lbl_tw_checked_count.pack(side=tk.LEFT)
+
+        btn_tw_check_all = ttk.Button(tw_toolbar, text=" 全选", image=self.icons["bolt"], compound=tk.LEFT, command=self.check_all_tw_variants)
+        btn_tw_check_all.pack(side=tk.LEFT, padx=(8, 2))
+
+        btn_tw_uncheck_all = ttk.Button(tw_toolbar, text=" 清空勾选", image=self.icons["clean"], compound=tk.LEFT, command=self.uncheck_all_tw_variants)
+        btn_tw_uncheck_all.pack(side=tk.LEFT, padx=2)
+
+        btn_tw_open_folder = ttk.Button(tw_toolbar, text=" 打开保存目录", image=self.icons["folder"], compound=tk.LEFT, command=lambda: self._open_folder(self.tw_dest_path_var.get()))
+        btn_tw_open_folder.pack(side=tk.RIGHT, padx=2)
+
+        # Treeview for video variants
+        cols = ("chk", "quality", "bitrate", "size", "filename")
+        self.tree_tw_variants = ttk.Treeview(tw_lower, columns=cols, show="headings", selectmode="extended")
+        
+        self.tree_tw_variants.heading("chk", text="☑ 勾选", anchor=tk.CENTER)
+        self.tree_tw_variants.heading("quality", text="清晰度 / 画质规格", anchor=tk.W)
+        self.tree_tw_variants.heading("bitrate", text="视频码率", anchor=tk.CENTER)
+        self.tree_tw_variants.heading("size", text="预估文件大小", anchor=tk.CENTER)
+        self.tree_tw_variants.heading("filename", text="下载文件名 / 目标名称", anchor=tk.W)
+
+        self.tree_tw_variants.column("chk", width=55, minwidth=50, stretch=False, anchor=tk.CENTER)
+        self.tree_tw_variants.column("quality", width=220, minwidth=160, stretch=False, anchor=tk.W)
+        self.tree_tw_variants.column("bitrate", width=110, minwidth=90, stretch=False, anchor=tk.CENTER)
+        self.tree_tw_variants.column("size", width=120, minwidth=100, stretch=False, anchor=tk.CENTER)
+        self.tree_tw_variants.column("filename", width=420, minwidth=200, stretch=True, anchor=tk.W)
+
+        self.tree_tw_variants.tag_configure("checked_tag", foreground="#198754", font=FONT_TABLE_BOLD)
+        self.tree_tw_variants.tag_configure("file_tag", foreground="#212529", font=FONT_TABLE)
+
+        tw_scroll_y = ttk.Scrollbar(tw_lower, orient=tk.VERTICAL, command=self.tree_tw_variants.yview)
+        tw_scroll_x = ttk.Scrollbar(tw_lower, orient=tk.HORIZONTAL, command=self.tree_tw_variants.xview)
+        self.tree_tw_variants.configure(yscrollcommand=tw_scroll_y.set, xscrollcommand=tw_scroll_x.set)
+
+        self.tree_tw_variants.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tw_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        tw_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.tree_tw_variants.bind("<Button-1>", self._on_tw_tree_click)
+        self.tree_tw_variants.bind("<space>", self._on_tw_tree_space)
+        self.tree_tw_variants.bind("<Double-1>", lambda e: self.add_twitter_to_queue())
+
+        # Bottom Action Bar inside Tab
+        tw_action_bar = ttk.Frame(tw_lower)
+        tw_action_bar.pack(fill=tk.X, pady=(6, 0))
+
+        btn_add_tw_queue = tk.Button(
+            tw_action_bar,
+            text="⬇️ 将已勾选画质规格加入统一下载队列",
+            font=FONT_BOLD,
+            bg="#0d6efd",
+            fg="#ffffff",
+            activebackground="#0b5ed7",
+            activeforeground="#ffffff",
+            relief=tk.RAISED,
+            padx=14, pady=5,
+            command=self.add_twitter_to_queue
+        )
+        btn_add_tw_queue.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_tw_quick_dl = tk.Button(
+            tw_action_bar,
+            text="🚀 立即下载最高画质 (1080P/720P) 并加入队列",
+            font=FONT_BOLD,
+            bg="#198754",
+            fg="#ffffff",
+            activebackground="#157347",
+            activeforeground="#ffffff",
+            relief=tk.RAISED,
+            padx=14, pady=5,
+            command=self.quick_download_twitter_highest
+        )
+        btn_tw_quick_dl.pack(side=tk.LEFT, padx=6)
+
+        self.tw_resolved_data = None
+        self.checked_tw_variants: Set[int] = set()
+
+    def _paste_twitter_url(self):
+        try:
+            cb_text = self.clipboard_get().strip()
+            if cb_text:
+                self.tw_url_var.set(cb_text)
+                self.log(f"[i] 已从剪贴板粘贴推文链接: {cb_text}")
+        except Exception:
+            pass
+
+    def _on_tw_preset_changed(self, event=None):
+        label = self.tw_preset_var.get()
+        if label in PRESET_DIRS_MAP:
+            self.tw_dest_path_var.set(PRESET_DIRS_MAP[label])
+
+    def browse_tw_dest_path(self):
+        cur = self.tw_dest_path_var.get().strip()
+        init_dir = cur if (cur and os.path.exists(cur)) else os.path.expanduser("~")
+        chosen = filedialog.askdirectory(parent=self, initialdir=init_dir, title="选择 Twitter 视频保存目标文件夹")
+        if chosen:
+            norm_dir = os.path.normpath(chosen)
+            self.tw_dest_path_var.set(norm_dir)
+
+    def start_resolve_twitter(self):
+        raw_url = self.tw_url_var.get().strip()
+        if not raw_url:
+            messagebox.showwarning("提示", "请输入 Twitter / X 推文链接或 Tweet ID！", parent=self)
+            return
+
+        self.btn_tw_fetch.config(state=tk.DISABLED)
+        self.lbl_status.config(text="状态: 正在智能解析 Twitter / X 视频元数据与高清直链...", foreground="blue")
+        proxy = self._get_effective_proxy()
+        self.log(f"\n[*] 正在解析推文: {raw_url} | 代理: {proxy or '直连'}...")
+
+        threading.Thread(target=self._resolve_twitter_worker, args=(raw_url, proxy), daemon=True).start()
+
+    def _resolve_twitter_worker(self, raw_url: str, proxy: Optional[str]):
+        try:
+            res = TwitterMediaResolver.resolve(raw_url, proxy)
+            self.tw_resolved_data = res
+            HistoryManager.record_access(f"@{res.get('author_id', '')} / {res.get('tweet_id')}", "twitter", "video", "main", len(res.get("variants", [])))
+            self.after(0, self._refresh_history_comboboxes)
+            self.after(0, self._populate_twitter_results)
+            self.after(0, lambda: self.log(f"[✓] 成功解析到 {len(res.get('variants', []))} 个清晰度规格！作者: {res.get('author')} ({res.get('author_id')})"))
+            self.after(0, lambda: self.lbl_status.config(text=f"状态: 成功解析推文视频 (共 {len(res.get('variants', []))} 项清晰度)", foreground="green"))
+        except Exception as e:
+            self.tw_resolved_data = None
+            err_str = str(e)
+            self.after(0, lambda: self.log(f"[✗] 解析 Twitter 视频失败: {err_str}"))
+            self.after(0, lambda: self.lbl_status.config(text="状态: Twitter 视频解析失败", foreground="red"))
+            self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析推文中的视频:\n{err_str}\n\n建议:\n1. 确认该推文中是否包含视频或动图 GIF；\n2. 检查网络代理客户端 (如 Clash/v2rayN) 是否正常运行并开启全局/规则代理。", parent=self))
+        finally:
+            self.after(0, lambda: self.btn_tw_fetch.config(state=tk.NORMAL))
+
+    def _populate_twitter_results(self):
+        if not self.tw_resolved_data:
+            return
+
+        data = self.tw_resolved_data
+        self.lbl_tw_author.config(text=f"推文作者: {data.get('author')} ({data.get('author_id')})")
+        self.lbl_tw_date.config(text=f"发布日期: {data.get('date')} | 视频时长: {data.get('duration')}")
+        self.lbl_tw_text.config(text=f"推文内容: {data.get('text')}")
+
+        self.tree_tw_variants.delete(*self.tree_tw_variants.get_children())
+        self.checked_tw_variants.clear()
+
+        variants = data.get("variants", [])
+        for idx, v in enumerate(variants):
+            is_default = (idx == 0) # Default check highest quality
+            if is_default:
+                self.checked_tw_variants.add(idx)
+            
+            chk_sym = "☑" if is_default else "☐"
+            tag = "checked_tag" if is_default else "file_tag"
+            self.tree_tw_variants.insert(
+                "", tk.END, iid=str(idx),
+                values=(chk_sym, v["quality"], v["bitrate_str"], v["size_str"], v["filename"]),
+                tags=(tag,)
+            )
+
+        self._update_tw_checked_count_label()
+
+    def _on_tw_tree_click(self, event):
+        region = self.tree_tw_variants.identify("region", event.x, event.y)
+        if region == "heading":
+            col = self.tree_tw_variants.identify_column(event.x)
+            if col == "#1":
+                self.check_all_tw_variants()
+                return "break"
+        elif region in ("cell", "tree", "item"):
+            item_id = self.tree_tw_variants.identify_row(event.y)
+            if item_id and item_id.isdigit():
+                self._toggle_single_tw_check(int(item_id))
+                self.tree_tw_variants.selection_set(item_id)
+                return "break"
+
+    def _on_tw_tree_space(self, event):
+        sel = self.tree_tw_variants.selection()
+        if sel:
+            for iid in sel:
+                if iid.isdigit():
+                    self._toggle_single_tw_check(int(iid))
+            return "break"
+
+    def _toggle_single_tw_check(self, idx: int):
+        if idx in self.checked_tw_variants:
+            self.checked_tw_variants.remove(idx)
+        else:
+            self.checked_tw_variants.add(idx)
+        self._update_tw_checkbox_display(idx)
+        self._update_tw_checked_count_label()
+
+    def _update_tw_checkbox_display(self, idx: int):
+        iid = str(idx)
+        if self.tree_tw_variants.exists(iid):
+            is_chk = idx in self.checked_tw_variants
+            chk_sym = "☑" if is_chk else "☐"
+            vals = list(self.tree_tw_variants.item(iid, "values"))
+            vals[0] = chk_sym
+            self.tree_tw_variants.item(iid, values=vals, tags=("checked_tag" if is_chk else "file_tag",))
+
+    def _update_tw_checked_count_label(self):
+        cnt = len(self.checked_tw_variants)
+        self.lbl_tw_checked_count.config(text=f"[已勾选: {cnt} 项规格]")
+
+    def check_all_tw_variants(self):
+        if not self.tw_resolved_data:
+            return
+        for idx in range(len(self.tw_resolved_data.get("variants", []))):
+            self.checked_tw_variants.add(idx)
+            self._update_tw_checkbox_display(idx)
+        self._update_tw_checked_count_label()
+
+    def uncheck_all_tw_variants(self):
+        self.checked_tw_variants.clear()
+        if self.tw_resolved_data:
+            for idx in range(len(self.tw_resolved_data.get("variants", []))):
+                self._update_tw_checkbox_display(idx)
+        self._update_tw_checked_count_label()
+
+    def add_twitter_to_queue(self):
+        if not self.tw_resolved_data or not self.tw_resolved_data.get("variants"):
+            messagebox.showwarning("提示", "请先解析推文视频！", parent=self)
+            return
+
+        target_indices = list(self.checked_tw_variants)
+        if not target_indices:
+            sel = self.tree_tw_variants.selection()
+            if sel:
+                target_indices = [int(x) for x in sel if x.isdigit()]
+
+        if not target_indices:
+            messagebox.showwarning("提示", "请先在列表中勾选需要下载的画质规格！", parent=self)
+            return
+
+        dest_dir = self.tw_dest_path_var.get().strip()
+        if not dest_dir:
+            messagebox.showwarning("提示", "请指定保存目标路径！", parent=self)
+            return
+        os.makedirs(dest_dir, exist_ok=True)
+
+        data = self.tw_resolved_data
+        variants = data.get("variants", [])
+        proxy = self._get_effective_proxy()
+        added_cnt = 0
+
+        for idx in sorted(target_indices):
+            if idx < 0 or idx >= len(variants):
+                continue
+            v = variants[idx]
+            v_url = v["url"]
+            v_name = v["filename"]
+
+            # Check if task already exists
+            exists = any(t.platform == "twitter" and t.direct_url == v_url and t.dest_dir == dest_dir for t in self.tasks)
+            if exists:
+                continue
+
+            task_id = self._get_next_task_id()
+            task = QueueTask(
+                task_id=task_id,
+                repo_id=f"🐦 {data.get('author_id') or 'Twitter'}",
+                repo_type="twitter",
+                branch=data.get("tweet_id", ""),
+                file_path=v_name,
+                size_str=v["size_str"],
+                date_str=data.get("date", datetime.now().strftime("%Y-%m-%d %H:%M")),
+                dest_dir=dest_dir,
+                flatten=True,
+                endpoint="https://twitter.com",
+                token=None,
+                proxy=proxy,
+                status="等待中",
+                progress=0.0,
+                total_bytes=v["raw_size"] if v["raw_size"] > 0 else None,
+                platform="twitter",
+                direct_url=v_url
+            )
+            task.check_local_status()
+            self.tasks.append(task)
+            added_cnt += 1
+
+        if added_cnt > 0:
+            self._save_tasks()
+            self.rescan_all_tasks(silent=True)
+            self._refresh_queue_tree()
+            self.log(f"[✓] 已将 {added_cnt} 项 Twitter 视频任务成功加入统一下载队列！")
+            messagebox.showinfo("入队成功", f"成功将 {added_cnt} 项 Twitter 视频任务加入统一下载队列！\n目标目录: {dest_dir}", parent=self)
+            self.notebook.select(3)
+        else:
+            messagebox.showinfo("提示", "所选的任务均已在队列中！", parent=self)
+
+    def quick_download_twitter_highest(self):
+        if not self.tw_resolved_data or not self.tw_resolved_data.get("variants"):
+            messagebox.showwarning("提示", "请先解析推文视频！", parent=self)
+            return
+
+        self.checked_tw_variants.clear()
+        self.checked_tw_variants.add(0) # Select index 0 (Highest resolution)
+        self._update_tw_checkbox_display(0)
+        self._update_tw_checked_count_label()
+        self.add_twitter_to_queue()
+        if not self.is_queue_running:
+            self.start_queue_download()
+
+    # ------------------ Tab 4: Download Queue UI with Checkboxes ------------------
     def _build_tab_queue(self):
         self.queue_info_bar = ttk.Frame(self.tab_queue)
         self.queue_info_bar.pack(fill=tk.X, pady=(0, 4))
@@ -3831,7 +4446,7 @@ class HFDownloaderApp(tk.Tk):
         self.log(f"[+] 已将 {added_count} 个文件加入下载队列 -> 保存至: {dest_dir}")
 
         if jump:
-            self.notebook.select(2)
+            self.notebook.select(3)
 
     def add_current_dir_to_queue(self):
         cur_dir = self.current_selected_dir
@@ -3930,7 +4545,7 @@ class HFDownloaderApp(tk.Tk):
             ), tags=(s_tag,))
 
         pending_count = sum(1 for t in self.tasks if t.status in ("等待中", "下载中", "已中断"))
-        self.notebook.tab(2, text=f" 📑 统一下载队列 ({pending_count}) ")
+        self.notebook.tab(3, text=f" 📑 统一下载队列 ({pending_count}) ")
         self._update_queue_checked_label()
 
     def _get_target_task_ids(self) -> List[int]:

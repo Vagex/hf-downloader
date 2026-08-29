@@ -178,6 +178,191 @@ DEFAULT_GITHUB_ACCELERATORS = [
     "不使用加速 (官方直连)"
 ]
 
+class TwitterMediaResolver:
+    """High-reliability multi-engine parser for Twitter / X media."""
+
+    @staticmethod
+    def extract_tweet_id(raw_input: str) -> Optional[str]:
+        raw_input = raw_input.strip()
+        m = re.search(r'status/(\d+)', raw_input)
+        if m:
+            return m.group(1)
+        m = re.search(r'^\d+$', raw_input)
+        if m:
+            return m.group(0)
+        return None
+
+    @classmethod
+    def resolve(cls, raw_input: str, proxy: Optional[str] = None) -> Dict[str, Any]:
+        """Resolves tweet media information with multiple fallback strategies."""
+        tweet_id = cls.extract_tweet_id(raw_input)
+        if not tweet_id and "http" not in raw_input:
+            raise ValueError("请输入有效的 Twitter / X 推文链接或 Tweet ID！")
+
+        target_url = raw_input if raw_input.startswith("http") else f"https://x.com/i/status/{tweet_id}"
+
+        # Strategy 1: yt-dlp deep resolution (if available)
+        try:
+            import yt_dlp
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'skip_download': True,
+            }
+            if proxy:
+                ydl_opts['proxy'] = proxy
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target_url, download=False)
+                if info:
+                    title = info.get('description') or info.get('title') or f"Tweet {tweet_id or ''}"
+                    uploader = info.get('uploader') or info.get('channel') or "Twitter 用户"
+                    uploader_id = info.get('uploader_id') or info.get('channel_id') or ""
+                    thumbnail = info.get('thumbnail')
+                    upload_date = info.get('upload_date')
+                    if upload_date and len(upload_date) == 8:
+                        upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+                    else:
+                        upload_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+                    formats = info.get('formats', [])
+                    video_variants = []
+                    seen_urls = set()
+
+                    for f in formats:
+                        furl = f.get('url')
+                        if not furl or furl in seen_urls:
+                            continue
+                        seen_urls.add(furl)
+
+                        vcodec = f.get('vcodec')
+                        acodec = f.get('acodec')
+                        width = f.get('width')
+                        height = f.get('height')
+                        filesize = f.get('filesize') or f.get('filesize_approx')
+                        tbr = f.get('tbr') or f.get('vbr') or 0
+
+                        if height:
+                            if height >= 1080:
+                                q_label = f"🎬 1080P 超清 ({width}x{height})"
+                            elif height >= 720:
+                                q_label = f"🎬 720P 高清 ({width}x{height})"
+                            elif height >= 480:
+                                q_label = f"🎬 480P 标清 ({width}x{height})"
+                            elif height >= 360:
+                                q_label = f"🎬 360P 流畅 ({width}x{height})"
+                            else:
+                                q_label = f"🎬 {height}P ({width}x{height})"
+                        elif vcodec != 'none' and furl.endswith('.mp4'):
+                            q_label = "🎬 标准 MP4 视频"
+                        elif acodec != 'none' and vcodec == 'none':
+                            q_label = "🎵 仅提取音频 (Audio Stream)"
+                        else:
+                            continue
+
+                        size_str = "--"
+                        if filesize:
+                            size_str = f"{filesize / (1024*1024):.2f} MB" if filesize >= 1024*1024 else f"{filesize/1024:.1f} KB"
+                        elif tbr and info.get('duration'):
+                            est = (tbr * 1000 / 8) * info.get('duration')
+                            size_str = f"~{est / (1024*1024):.1f} MB"
+
+                        bitrate_str = f"{int(tbr)} kbps" if tbr else "--"
+                        clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"{uploader_id or 'twitter'}_{tweet_id or info.get('id')}_{height or 'video'}.mp4")
+
+                        video_variants.append({
+                            "quality": q_label,
+                            "height": height or 0,
+                            "bitrate": tbr or 0,
+                            "bitrate_str": bitrate_str,
+                            "size_str": size_str,
+                            "raw_size": filesize or 0,
+                            "url": furl,
+                            "filename": clean_fn
+                        })
+
+                    video_variants.sort(key=lambda x: (x["height"], x["bitrate"]), reverse=True)
+
+                    if video_variants:
+                        return {
+                            "tweet_id": tweet_id or str(info.get('id')),
+                            "author": uploader,
+                            "author_id": f"@{uploader_id}" if uploader_id else "",
+                            "text": title.strip(),
+                            "date": upload_date,
+                            "duration": info.get('duration_string') or "--",
+                            "thumbnail": thumbnail,
+                            "variants": video_variants
+                        }
+        except Exception:
+            pass
+
+        # Strategy 2: Syndication API fallback (Pure requests)
+        if tweet_id:
+            try:
+                api_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&lang=en"
+                proxies = {"http": proxy, "https": proxy} if proxy else None
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json"
+                }
+                resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=12)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    user = data.get("user", {})
+                    author = user.get("name", "Twitter 用户")
+                    author_id = f"@{user.get('screen_name', '')}"
+                    text = data.get("text", "")
+                    raw_created = data.get("created_at")
+                    pub_date = raw_created[:16].replace("T", " ") if raw_created else datetime.now().strftime("%Y-%m-%d %H:%M")
+
+                    media_list = data.get("mediaDetails", [])
+                    variants_list = []
+                    for m in media_list:
+                        v_info = m.get("video_info", {})
+                        for var in v_info.get("variants", []):
+                            if var.get("content_type") == "video/mp4":
+                                br = var.get("bitrate", 0)
+                                furl = var.get("url")
+                                m_res = re.search(r'/(\d+)x(\d+)/', furl)
+                                if m_res:
+                                    w, h = int(m_res.group(1)), int(m_res.group(2))
+                                    h_min = min(w, h)
+                                    q_label = f"🎬 {h_min}P 高清 ({w}x{h})"
+                                else:
+                                    q_label = f"🎬 MP4 视频 ({br // 1000} kbps)"
+                                
+                                clean_fn = f"twitter_{user.get('screen_name', 'video')}_{tweet_id}_{br}.mp4"
+                                variants_list.append({
+                                    "quality": q_label,
+                                    "height": br,
+                                    "bitrate": br // 1000,
+                                    "bitrate_str": f"{br // 1000} kbps",
+                                    "size_str": "--",
+                                    "raw_size": 0,
+                                    "url": furl,
+                                    "filename": clean_fn
+                                })
+
+                    variants_list.sort(key=lambda x: x["bitrate"], reverse=True)
+                    if variants_list:
+                        return {
+                            "tweet_id": tweet_id,
+                            "author": author,
+                            "author_id": author_id,
+                            "text": text,
+                            "date": pub_date,
+                            "duration": "--",
+                            "thumbnail": None,
+                            "variants": variants_list
+                        }
+            except Exception:
+                pass
+
+        raise ValueError("未能解析到该推文中的视频，请确认链接是否有效，或确认是否已开启网络代理！")
+
+
 # Modern Professional Color Palette
 COLOR_BG_DARK = "#090d16"         # App Background
 COLOR_SURFACE_DARK = "#111827"    # Card/Panel Background
@@ -1520,6 +1705,10 @@ def main(page: ft.Page):
                             tf_gh_repo.value = repo
                             tf_gh_branch.value = b
                             start_fetch_gh()
+                        elif p == "twitter":
+                            switch_to_tab("twitter")
+                            tf_tw_url.value = repo if repo.startswith("http") else (f"https://x.com/i/status/{repo}" if repo.isdigit() else repo)
+                            start_fetch_tw()
                         else:
                             switch_to_tab("browse")
                             tf_repo.value = repo
@@ -2412,6 +2601,283 @@ def main(page: ft.Page):
         ], spacing=8)
     ], expand=True, spacing=6)
 
+    # ------------------ Tab 3: Twitter / X Video Downloader View & Handlers (Flet) ------------------
+    tf_tw_url = ft.TextField(
+        hint_text="输入 Twitter / X 推文链接 (例如 https://x.com/user/status/123456789) 或 Tweet ID",
+        expand=True, dense=True, height=STANDARD_CONTROL_HEIGHT, text_size=12,
+        content_padding=STD_PADDING, border_radius=STD_RADIUS
+    )
+
+    dd_tw_preset = ft.Dropdown(
+        options=[ft.dropdown.Option(k) for k in PRESET_DIRS_MAP.keys()],
+        value=list(PRESET_DIRS_MAP.keys())[0], dense=True, text_size=12, width=280, height=38,
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=4)
+    )
+
+    tf_tw_dest = ft.TextField(
+        value=PRESET_DIRS_MAP[list(PRESET_DIRS_MAP.keys())[0]],
+        expand=True, dense=True, height=STANDARD_CONTROL_HEIGHT, text_size=12,
+        content_padding=STD_PADDING, border_radius=STD_RADIUS
+    )
+
+    def on_tw_preset_change(e):
+        k = dd_tw_preset.value
+        if k in PRESET_DIRS_MAP:
+            tf_tw_dest.value = PRESET_DIRS_MAP[k]
+            page.update()
+
+    dd_tw_preset.on_change = on_tw_preset_change
+
+    lbl_tw_author = ft.Text("推文作者: --", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT)
+    lbl_tw_date = ft.Text("发布日期: -- | 视频时长: --", size=12, color=ft.Colors.GREY_600)
+    lbl_tw_text = ft.Text("推文内容: (请在上方面板输入推文链接并点击【开始解析视频】)", size=12)
+    lbl_tw_checked = ft.Text("[已勾选: 0 项规格]", weight=ft.FontWeight.BOLD, color=COLOR_SUCCESS, size=13)
+
+    col_tw_variants = ft.ListView(expand=True, spacing=4)
+    raw_tw_data = None
+    checked_tw_indices = set()
+
+    def refresh_tw_variants_view():
+        col_tw_variants.controls.clear()
+        if not raw_tw_data:
+            page.update()
+            return
+
+        variants = raw_tw_data.get("variants", [])
+        
+        # Header Row
+        col_tw_variants.controls.append(
+            ft.Container(
+                content=ft.Row([
+                    ft.Text("勾选", width=42, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("画质 / 清晰度规格", width=220, weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("视频码率", width=110, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("预估大小", width=110, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("目标文件名", expand=True, weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("操作", width=65, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD, size=12),
+                ]),
+                border_radius=4,
+                padding=ft.Padding.symmetric(horizontal=8, vertical=6)
+            )
+        )
+
+        def make_chk_handler(idx):
+            def _handler(e):
+                if e.control.value:
+                    checked_tw_indices.add(idx)
+                else:
+                    checked_tw_indices.discard(idx)
+                lbl_tw_checked.value = f"[已勾选: {len(checked_tw_indices)} 项规格]"
+                refresh_tw_variants_view()
+            return _handler
+
+        def make_quick_dl_single(idx):
+            checked_tw_indices.clear()
+            checked_tw_indices.add(idx)
+            add_tw_to_queue(jump=True)
+
+        for idx, v in enumerate(variants):
+            is_chk = idx in checked_tw_indices
+            col_tw_variants.controls.append(
+                ft.Container(
+                    content=ft.Row([
+                        ft.Checkbox(value=is_chk, on_change=make_chk_handler(idx), scale=0.85),
+                        ft.Row([
+                            ft.Icon(ft.Icons.SMART_DISPLAY, size=18, color=COLOR_ACCENT if is_chk else COLOR_WARNING),
+                            ft.Text(v["quality"], size=13, weight=ft.FontWeight.BOLD if is_chk else ft.FontWeight.NORMAL)
+                        ], width=220),
+                        ft.Text(v["bitrate_str"], width=110, text_align=ft.TextAlign.CENTER, size=12),
+                        ft.Text(v["size_str"], width=110, text_align=ft.TextAlign.CENTER, size=12, color=COLOR_SUCCESS, weight=ft.FontWeight.BOLD),
+                        ft.Text(v["filename"], expand=True, size=12),
+                        ft.IconButton(
+                            icon=ft.Icons.DOWNLOAD,
+                            icon_size=16,
+                            tooltip="加入队列并立即下载",
+                            on_click=lambda e, i=idx: make_quick_dl_single(i)
+                        )
+                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    border=ft.Border.all(1, COLOR_ACCENT if is_chk else ft.Colors.TRANSPARENT),
+                    border_radius=4,
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                    bgcolor=ft.Colors.with_opacity(0.06, COLOR_ACCENT) if is_chk else None
+                )
+            )
+        page.update()
+
+    def start_fetch_tw(e=None):
+        raw_url = (tf_tw_url.value or "").strip()
+        if not raw_url:
+            show_snack("请输入有效的 Twitter / X 推文链接或 Tweet ID！", is_error=True)
+            return
+
+        btn_tw_fetch.disabled = True
+        lbl_global_status.value = "状态: 正在智能解析 Twitter / X 视频元数据与高清直链..."
+        log(f"\n[*] 正在解析推文: {raw_url}...")
+        page.update()
+
+        def _worker():
+            nonlocal raw_tw_data
+            proxy = get_effective_proxy()
+            try:
+                res = TwitterMediaResolver.resolve(raw_url, proxy)
+                raw_tw_data = res
+                checked_tw_indices.clear()
+                if res.get("variants"):
+                    checked_tw_indices.add(0) # Default check highest quality
+                
+                lbl_tw_author.value = f"推文作者: {res.get('author')} ({res.get('author_id')})"
+                lbl_tw_date.value = f"发布日期: {res.get('date')} | 视频时长: {res.get('duration')}"
+                lbl_tw_text.value = f"推文内容: {res.get('text')}"
+                lbl_tw_checked.value = f"[已勾选: {len(checked_tw_indices)} 项规格]"
+
+                HistoryManager.record_access(f"@{res.get('author_id', '')} / {res.get('tweet_id')}", "twitter", "video", "main", len(res.get("variants", [])))
+                log(f"[✓] 成功解析到 {len(res.get('variants', []))} 个画质规格！作者: {res.get('author')} ({res.get('author_id')})")
+                show_snack(f"成功解析到 {len(res.get('variants', []))} 个画质规格！")
+                lbl_global_status.value = f"状态: 成功解析推文视频 (共 {len(res.get('variants', []))} 项清晰度)"
+                refresh_tw_variants_view()
+            except Exception as err:
+                raw_tw_data = None
+                log(f"[✗] 解析 Twitter 视频失败: {str(err)}")
+                show_snack(f"解析失败: {str(err)}", is_error=True)
+                lbl_global_status.value = "状态: Twitter 视频解析失败"
+            finally:
+                btn_tw_fetch.disabled = False
+                page.update()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def add_tw_to_queue(jump: bool = False):
+        if not raw_tw_data or not raw_tw_data.get("variants"):
+            show_snack("请先解析推文视频！", is_error=True)
+            return
+
+        if not checked_tw_indices:
+            show_snack("请先勾选需要下载的画质规格！", is_error=True)
+            return
+
+        dest_dir = tf_tw_dest.value.strip()
+        if not dest_dir:
+            show_snack("请指定保存目标路径！", is_error=True)
+            return
+        os.makedirs(dest_dir, exist_ok=True)
+
+        variants = raw_tw_data.get("variants", [])
+        proxy = get_effective_proxy()
+        added = 0
+
+        for idx in sorted(list(checked_tw_indices)):
+            if idx < 0 or idx >= len(variants):
+                continue
+            v = variants[idx]
+            v_url = v["url"]
+            v_name = v["filename"]
+
+            if any(t.platform == "twitter" and t.direct_url == v_url and t.dest_dir == dest_dir for t in tasks):
+                continue
+
+            nonlocal task_counter
+            task = QueueTask(
+                task_id=task_counter,
+                repo_id=f"🐦 {raw_tw_data.get('author_id') or 'Twitter'}",
+                repo_type="twitter",
+                branch=raw_tw_data.get("tweet_id", ""),
+                file_path=v_name,
+                size_str=v["size_str"],
+                date_str=raw_tw_data.get("date", datetime.now().strftime("%Y-%m-%d %H:%M")),
+                dest_dir=dest_dir,
+                flatten=True,
+                endpoint="https://twitter.com",
+                token=None,
+                proxy=proxy,
+                status="等待中",
+                progress=0.0,
+                total_bytes=v["raw_size"] if v["raw_size"] > 0 else None,
+                platform="twitter",
+                direct_url=v_url
+            )
+            task.check_local_status()
+            tasks.append(task)
+            task_counter += 1
+            added += 1
+
+        if added > 0:
+            save_tasks()
+            refresh_queue_view()
+            update_queue_tab_badge()
+            show_snack(f"已成功将 {added} 项 Twitter 视频任务加入下载队列！")
+            log(f"[✓] 已将 {added} 项 Twitter 视频任务成功加入统一下载队列！(目标目录: {dest_dir})")
+            if jump:
+                switch_to_tab("queue")
+        else:
+            show_snack("所选的任务均已在队列中！")
+
+    btn_tw_fetch = ft.ElevatedButton("⚡ 开始解析视频", icon=ft.Icons.SEARCH, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=start_fetch_tw, height=38)
+
+    top_tw_config_container = ft.Container(
+        content=ft.Column([
+            ft.Text("🐦 Twitter / X 视频解析与网络加速配置", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT),
+            ft.Row([
+                ft.Text("推文链接:", size=13, weight=ft.FontWeight.BOLD), tf_tw_url,
+                btn_tw_fetch,
+                ft.ElevatedButton("历史/收藏", icon=ft.Icons.HISTORY, on_click=lambda e: open_history_dialog("twitter"), height=38)
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Row([
+                ft.Text("网络代理:", size=13, weight=ft.FontWeight.BOLD), dd_proxy,
+                ft.ElevatedButton("检测代理连通性", icon=ft.Icons.BOLT, on_click=test_proxy, height=38)
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ], spacing=6),
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border_radius=8,
+        padding=10
+    )
+
+    tw_dest_container = ft.Container(
+        content=ft.Column([
+            ft.Text("💾 视频保存目标目录", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT),
+            ft.Row([
+                ft.Text("分类预设:", size=13, weight=ft.FontWeight.BOLD), dd_tw_preset,
+                ft.Text("保存路径:", size=13, weight=ft.FontWeight.BOLD), tf_tw_dest
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ], spacing=6),
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border_radius=8,
+        padding=10
+    )
+
+    tw_meta_container = ft.Container(
+        content=ft.Column([
+            lbl_tw_author,
+            lbl_tw_date,
+            lbl_tw_text
+        ], spacing=3),
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border_radius=8,
+        padding=10
+    )
+
+    tab_twitter_view = ft.Column([
+        top_tw_config_container,
+        tw_dest_container,
+        tw_meta_container,
+        ft.Container(
+            content=ft.Row([
+                lbl_tw_checked,
+                ft.Container(expand=True),
+                ft.ElevatedButton("全选画质", icon=ft.Icons.SELECT_ALL, on_click=lambda e: (checked_tw_indices.update(range(len(raw_tw_data.get("variants", [])))) if raw_tw_data else None) or (setattr(lbl_tw_checked, "value", f"[已勾选: {len(checked_tw_indices)} 项规格]") or refresh_tw_variants_view()), height=36),
+                ft.ElevatedButton("清空勾选", icon=ft.Icons.DESELECT, on_click=lambda e: checked_tw_indices.clear() or (setattr(lbl_tw_checked, "value", "[已勾选: 0 项规格]") or refresh_tw_variants_view()), height=36),
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2)
+        ),
+        ft.Container(
+            content=col_tw_variants,
+            expand=True, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=6
+        ),
+        ft.Row([
+            ft.ElevatedButton("⬇️ 将勾选画质规格加入统一下载队列", icon=ft.Icons.DOWNLOAD, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=lambda e: add_tw_to_queue(False), height=38),
+            ft.ElevatedButton("🚀 立即下载最高画质 (并跳转队列)", icon=ft.Icons.ROCKET_LAUNCH, bgcolor=COLOR_SUCCESS, color=ft.Colors.WHITE, on_click=lambda e: add_tw_to_queue(True), height=38),
+        ], spacing=8)
+    ], expand=True, spacing=6)
+
     content_area = ft.Container(content=tab_browser_view, expand=True)
 
     def update_queue_tab_badge():
@@ -2422,6 +2888,7 @@ def main(page: ft.Page):
     def switch_to_tab(tab_name: str):
         btn_nav_browse.style = None
         btn_nav_github.style = None
+        btn_nav_twitter.style = None
         btn_nav_queue.style = None
         btn_nav_env.style = None
 
@@ -2431,6 +2898,9 @@ def main(page: ft.Page):
         elif tab_name == "github":
             btn_nav_github.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
             content_area.content = tab_github_view
+        elif tab_name == "twitter":
+            btn_nav_twitter.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
+            content_area.content = tab_twitter_view
         elif tab_name == "queue":
             btn_nav_queue.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
             content_area.content = tab_queue_view
@@ -2449,6 +2919,10 @@ def main(page: ft.Page):
         "GitHub 资源浏览器", icon=ft.Icons.AUTO_AWESOME_MOTION,
         on_click=lambda e: switch_to_tab("github"), height=38
     )
+    btn_nav_twitter = ft.ElevatedButton(
+        "Twitter / X 视频", icon=ft.Icons.SMART_DISPLAY,
+        on_click=lambda e: switch_to_tab("twitter"), height=38
+    )
     btn_nav_queue = ft.ElevatedButton(
         "统一下载队列 (0)", icon=ft.Icons.FORMAT_LIST_BULLETED,
         on_click=lambda e: switch_to_tab("queue"), height=38
@@ -2461,13 +2935,14 @@ def main(page: ft.Page):
     btn_about = ft.IconButton(
         icon=ft.Icons.INFO_OUTLINE,
         tooltip="关于与使用说明",
-        on_click=lambda e: show_snack("🚀 Hugging Face 极速多线程与断点续传下载器 (Pro Edition)")
+        on_click=lambda e: show_snack("🚀 Hugging Face & GitHub & Twitter 极速下载器 (Pro Edition)")
     )
 
     nav_bar = ft.Container(
         content=ft.Row([
             btn_nav_browse,
             btn_nav_github,
+            btn_nav_twitter,
             btn_nav_queue,
             btn_nav_env,
             ft.Container(expand=True),  # Push controls to the right
