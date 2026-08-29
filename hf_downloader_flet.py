@@ -1832,7 +1832,7 @@ def main(page: ft.Page):
 
     dd_gh_preset = ft.Dropdown(
         options=[ft.dropdown.Option(k) for k in PRESET_DIRS_MAP.keys()],
-        value=list(PRESET_DIRS_MAP.keys())[0], dense=True, text_size=12, width=220, height=38,
+        value=list(PRESET_DIRS_MAP.keys())[0], dense=True, text_size=12, width=280, height=38,
         content_padding=ft.Padding.symmetric(horizontal=8, vertical=4)
     )
     dd_gh_preset.on_change = on_gh_preset_change

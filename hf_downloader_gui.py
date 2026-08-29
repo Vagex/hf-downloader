@@ -2038,8 +2038,8 @@ class HFDownloaderApp(tk.Tk):
         
         preset_names = list(PRESET_DIRS_MAP.keys())
         self.gh_preset_var = tk.StringVar(value=preset_names[0])
-        gh_preset_combo = ttk.Combobox(config_frame, textvariable=self.gh_preset_var, values=preset_names, state="readonly", width=26, font=FONT_BOLD)
-        gh_preset_combo.grid(row=2, column=1, sticky=tk.W, padx=4, pady=3)
+        gh_preset_combo = ttk.Combobox(config_frame, textvariable=self.gh_preset_var, values=preset_names, state="readonly", font=FONT_BOLD)
+        gh_preset_combo.grid(row=2, column=1, sticky=tk.EW, padx=4, pady=3)
         gh_preset_combo.bind("<<ComboboxSelected>>", self._on_gh_preset_changed)
         ComboboxItemToolTip(gh_preset_combo, PRESET_DIRS_MAP)
 
