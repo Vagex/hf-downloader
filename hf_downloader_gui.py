@@ -3146,7 +3146,7 @@ class HFDownloaderApp(tk.Tk):
         self.log(f"[+] 已将 {added_count} 个文件加入下载队列 -> 保存至: {dest_dir}")
 
         if jump:
-            self.notebook.select(1)
+            self.notebook.select(2)
 
     def add_current_dir_to_queue(self):
         cur_dir = self.current_selected_dir
@@ -3245,7 +3245,7 @@ class HFDownloaderApp(tk.Tk):
             ), tags=(s_tag,))
 
         pending_count = sum(1 for t in self.tasks if t.status in ("等待中", "下载中", "已中断"))
-        self.notebook.tab(1, text=f" 📑 下载任务队列 ({pending_count}) ")
+        self.notebook.tab(2, text=f" 📑 统一下载队列 ({pending_count}) ")
         self._update_queue_checked_label()
 
     def _get_target_task_ids(self) -> List[int]:
