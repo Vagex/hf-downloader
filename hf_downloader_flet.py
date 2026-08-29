@@ -1214,6 +1214,38 @@ def main(page: ft.Page):
                 current_task.status = "已完成"
                 current_task.progress = 100.0
                 log(f"[✓] 任务 #{current_task.task_id} 下载完成！")
+
+                if current_task.repo_type == "github_zip" and target_file_path.endswith(".zip"):
+                    try:
+                        import zipfile
+                        extract_dest = current_task.dest_dir
+                        log(f"     [自动解压] 正在解压 {os.path.basename(target_file_path)} 至: {extract_dest}")
+                        with zipfile.ZipFile(target_file_path, 'r') as zip_ref:
+                            file_list = zip_ref.namelist()
+                            root_prefix = ""
+                            if file_list and "/" in file_list[0]:
+                                candidate = file_list[0].split("/")[0] + "/"
+                                if all(f.startswith(candidate) for f in file_list if f != candidate):
+                                    root_prefix = candidate
+
+                            for member in zip_ref.infolist():
+                                target_rel = member.filename
+                                if root_prefix and target_rel.startswith(root_prefix):
+                                    target_rel = target_rel[len(root_prefix):]
+                                if not target_rel:
+                                    continue
+                                
+                                out_path = os.path.join(extract_dest, os.path.normpath(target_rel))
+                                if member.is_dir():
+                                    os.makedirs(out_path, exist_ok=True)
+                                else:
+                                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                                    with zip_ref.open(member) as source, open(out_path, "wb") as target:
+                                        target.write(source.read())
+
+                        log(f"     [✓] 解压完成！所有文件已收纳在独立目录: {extract_dest}")
+                    except Exception as ze:
+                        log(f"     [!] 自动解压提示: {str(ze)}")
             else:
                 current_task.status = "失败"
                 log(f"[✗] 任务 #{current_task.task_id} 失败: {current_task.error_msg}")
@@ -2101,18 +2133,29 @@ def main(page: ft.Page):
                 checked_gh_items.discard(key)
         render_gh_scope(scope)
 
+    def _resolve_github_dest_dir(base_dest: str, repo_id: str) -> str:
+        clean_repo = repo_id.replace("🐙", "").strip()
+        repo_name = clean_repo.split("/")[-1]
+        norm_dest = os.path.normpath(base_dest)
+        last_dir = os.path.basename(norm_dest)
+        if last_dir.lower() != repo_name.lower():
+            return os.path.join(norm_dest, repo_name)
+        return norm_dest
+
     def add_gh_to_queue(jump: bool = False):
         if not checked_gh_items:
             show_snack("请先在右侧勾选需要下载的 GitHub 文件或资源！", is_error=True)
             return
 
-        dest_dir = (tf_gh_dest.value or "").strip()
-        if not dest_dir:
+        raw_dest_dir = (tf_gh_dest.value or "").strip()
+        if not raw_dest_dir:
             show_snack("请指定保存目标路径！", is_error=True)
             return
 
-        os.makedirs(dest_dir, exist_ok=True)
         repo_id = (tf_gh_repo.value or "").strip()
+        dest_dir = _resolve_github_dest_dir(raw_dest_dir, repo_id)
+        os.makedirs(dest_dir, exist_ok=True)
+        
         token = (tf_gh_token.value or "").strip() or None
         proxy = get_effective_proxy()
         flatten = cb_gh_flatten.value
@@ -2157,8 +2200,8 @@ def main(page: ft.Page):
         save_tasks()
         refresh_queue_view()
         update_queue_tab_badge()
-        show_snack(f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
-        log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入下载队列！")
+        show_snack(f"成功将 {added_cnt} 个 GitHub 资源加入下载队列！(保存至: {dest_dir})")
+        log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入下载队列！(目录: {dest_dir})")
 
         if jump:
             switch_to_tab("queue")
@@ -2170,7 +2213,12 @@ def main(page: ft.Page):
             return
 
         branch = (tf_gh_branch.value or "master").strip()
-        dest_dir = (tf_gh_dest.value or "").strip()
+        raw_dest_dir = (tf_gh_dest.value or "").strip()
+        if not raw_dest_dir:
+            show_snack("请指定保存目标路径！", is_error=True)
+            return
+
+        dest_dir = _resolve_github_dest_dir(raw_dest_dir, repo_id)
         os.makedirs(dest_dir, exist_ok=True)
 
         repo_name = repo_id.split("/")[-1]
@@ -2201,8 +2249,8 @@ def main(page: ft.Page):
         save_tasks()
         refresh_queue_view()
         update_queue_tab_badge()
-        show_snack(f"已添加整包源码 Zip 任务: {zip_name}")
-        log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name}")
+        show_snack(f"已添加整包源码 Zip 任务: {zip_name} (下载后将自动解压至: {dest_dir})")
+        log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name} (目录: {dest_dir})")
         switch_to_tab("queue")
 
     btn_gh_fetch = ft.ElevatedButton("获取 GitHub 资源", icon=ft.Icons.SEARCH, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=start_fetch_gh, height=38)

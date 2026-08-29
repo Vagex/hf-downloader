@@ -2485,6 +2485,21 @@ class HFDownloaderApp(tk.Tk):
         self.task_counter = tid + 1
         return tid
 
+    def _resolve_github_dest_dir(self, base_dest: str, repo_id: str) -> str:
+        """
+        Ensures downloaded files or zips are neatly encapsulated in a dedicated subfolder
+        (e.g., custom_nodes/minimax_h3_workflows) rather than scattered loose in parent folder.
+        """
+        clean_repo = repo_id.replace("🐙", "").strip()
+        repo_name = clean_repo.split("/")[-1]
+        norm_dest = os.path.normpath(base_dest)
+        last_dir = os.path.basename(norm_dest)
+        
+        # If the destination does not already end with repo_name, auto-append repo subfolder
+        if last_dir.lower() != repo_name.lower():
+            return os.path.join(norm_dest, repo_name)
+        return norm_dest
+
     def add_github_to_queue(self, jump: bool = False):
         target_keys = list(self.checked_gh_items)
         if not target_keys:
@@ -2497,13 +2512,16 @@ class HFDownloaderApp(tk.Tk):
             messagebox.showwarning("提示", "请先在右侧列表中勾选或鼠标选择需要下载的 GitHub 文件或资源！", parent=self)
             return
 
-        dest_dir = self.gh_dest_path_var.get().strip()
-        if not dest_dir:
+        raw_dest_dir = self.gh_dest_path_var.get().strip()
+        if not raw_dest_dir:
             messagebox.showwarning("提示", "请指定保存目标路径！", parent=self)
             return
 
-        os.makedirs(dest_dir, exist_ok=True)
         repo_id = self.gh_repo_var.get().strip()
+        # Auto-encapsulate inside dedicated repo subfolder!
+        dest_dir = self._resolve_github_dest_dir(raw_dest_dir, repo_id)
+        os.makedirs(dest_dir, exist_ok=True)
+        
         token = self.gh_token_var.get().strip() or None
         proxy = self._get_effective_proxy()
         flatten = self.gh_flatten_var.get()
@@ -2550,8 +2568,8 @@ class HFDownloaderApp(tk.Tk):
         self._save_tasks()
         self.rescan_all_tasks(silent=True)
         self._refresh_queue_tree()
-        self.log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
-        messagebox.showinfo("入队成功", f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！", parent=self)
+        self.log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！(专属目标目录: {dest_dir})")
+        messagebox.showinfo("入队成功", f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！\n所有文件将集中保存在独立目录:\n{dest_dir}", parent=self)
 
         if jump or True:  # Jump to queue tab to show user the newly added tasks immediately
             self.notebook.select(2)
@@ -2563,7 +2581,13 @@ class HFDownloaderApp(tk.Tk):
             return
 
         branch = self.gh_branch_var.get().strip() or "main"
-        dest_dir = self.gh_dest_path_var.get().strip()
+        raw_dest_dir = self.gh_dest_path_var.get().strip()
+        if not raw_dest_dir:
+            messagebox.showwarning("提示", "请指定保存目标路径！", parent=self)
+            return
+
+        # Auto-encapsulate inside dedicated repo subfolder!
+        dest_dir = self._resolve_github_dest_dir(raw_dest_dir, repo_id)
         os.makedirs(dest_dir, exist_ok=True)
 
         repo_name = repo_id.split("/")[-1]
@@ -2595,8 +2619,8 @@ class HFDownloaderApp(tk.Tk):
         self._save_tasks()
         self.rescan_all_tasks(silent=True)
         self._refresh_queue_tree()
-        self.log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name}")
-        messagebox.showinfo("入队成功", f"已将 GitHub 整包源码 Zip 任务加入队列:\n{zip_name}\n保存到: {dest_dir}", parent=self)
+        self.log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name} (下载后将自动解压并收纳在: {dest_dir})")
+        messagebox.showinfo("入队成功", f"已将 GitHub 整包源码 Zip 任务加入队列:\n{zip_name}\n保存与解压目标目录: {dest_dir}", parent=self)
         self.notebook.select(2)
 
     # ------------------ Tab 3: Download Queue UI with Checkboxes ------------------
@@ -4073,9 +4097,40 @@ class HFDownloaderApp(tk.Tk):
                 current_task.status = "已完成"
                 current_task.progress = 100.0
                 self.log(f"[✓] 任务 #{current_task.task_id} 下载完成！")
-            else:
-                current_task.status = "已中断" if "取消" in current_task.error_msg else "失败"
-                self.log(f"[✗] 任务 #{current_task.task_id} 中断/失败: {current_task.error_msg}")
+
+                # Auto-extract and organize GitHub Zip packages into subfolder
+                if current_task.repo_type == "github_zip" and target_file_path.endswith(".zip"):
+                    try:
+                        import zipfile
+                        extract_dest = current_task.dest_dir
+                        self.log(f"     [自动解压与收纳] 正在将 {os.path.basename(target_file_path)} 解压部署至: {extract_dest}")
+                        with zipfile.ZipFile(target_file_path, 'r') as zip_ref:
+                            file_list = zip_ref.namelist()
+                            # Check if archive wraps all contents inside a single top-level folder (e.g. repo-main/)
+                            root_prefix = ""
+                            if file_list and "/" in file_list[0]:
+                                candidate = file_list[0].split("/")[0] + "/"
+                                if all(f.startswith(candidate) for f in file_list if f != candidate):
+                                    root_prefix = candidate
+
+                            for member in zip_ref.infolist():
+                                target_rel = member.filename
+                                if root_prefix and target_rel.startswith(root_prefix):
+                                    target_rel = target_rel[len(root_prefix):]
+                                if not target_rel:
+                                    continue
+                                
+                                out_path = os.path.join(extract_dest, os.path.normpath(target_rel))
+                                if member.is_dir():
+                                    os.makedirs(out_path, exist_ok=True)
+                                else:
+                                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                                    with zip_ref.open(member) as source, open(out_path, "wb") as target:
+                                        target.write(source.read())
+
+                        self.log(f"     [✓] 自动解压完成！所有文件已规范收纳在独立目录:\n         {extract_dest}")
+                    except Exception as ze:
+                        self.log(f"     [!] 自动解压提示: {str(ze)}")
 
             self.active_task_id = None
             self.after(0, self._refresh_queue_tree)
