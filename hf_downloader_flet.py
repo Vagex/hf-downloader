@@ -2468,20 +2468,39 @@ def main(page: ft.Page):
             token = (tf_gh_token.value or "").strip() or None
             proxies = get_request_proxies()
 
-            headers = {"User-Agent": "HF-Flet-Downloader", "Accept": "application/vnd.github.v3+json"}
+            headers = {"User-Agent": "HF-Downloader-GUI/1.0", "Accept": "application/vnd.github.v3+json"}
             if token:
                 headers["Authorization"] = f"token {token}"
+
+            def _gh_api_get(url: str, timeout: int = 15, retries: int = 2) -> Tuple[Optional[requests.Response], Optional[str]]:
+                last_err = None
+                for attempt in range(retries + 1):
+                    try:
+                        resp = requests.get(url, headers=headers, proxies=proxies, timeout=timeout)
+                        return resp, None
+                    except requests.exceptions.Timeout:
+                        last_err = f"连接 GitHub API 超时 (Read timed out, 超时设置 {timeout}s)"
+                        if attempt < retries:
+                            time.sleep(1)
+                    except requests.exceptions.ConnectionError as ce:
+                        last_err = f"网络连接失败 (无法连接 api.github.com): {str(ce)}"
+                        if attempt < retries:
+                            time.sleep(1)
+                    except Exception as e:
+                        last_err = str(e)
+                        break
+                return None, last_err
 
             items_map = {}
             nav_struct = {}
             err_msg = None
             actual_branch = branch_input or "main"
+            repo_pushed_date = "--"
 
             # 1. Fetch Repository Metadata
-            try:
-                repo_api_url = f"https://api.github.com/repos/{clean_repo}"
-                r_info = requests.get(repo_api_url, headers=headers, proxies=proxies, timeout=10)
-                repo_pushed_date = "--"
+            repo_api_url = f"https://api.github.com/repos/{clean_repo}"
+            r_info, r_err = _gh_api_get(repo_api_url, timeout=12, retries=1)
+            if r_info is not None:
                 if r_info.status_code == 200:
                     repo_info = r_info.json()
                     default_b = repo_info.get("default_branch") or "main"
@@ -2494,30 +2513,29 @@ def main(page: ft.Page):
                 elif r_info.status_code == 404:
                     err_msg = "未找到该 GitHub 仓库，请核对 owner/repo 拼写或确认是否为私有仓库。"
                 elif r_info.status_code == 403:
-                    err_msg = "GitHub API 调用频率已达上限，请在上方输入 GitHub Token！"
-            except Exception as e:
-                pass
+                    err_msg = "GitHub API 调用频率已达上限 (403 Rate Limit)，请在上方输入 GitHub Token 即可大幅提升请求配额！"
+                else:
+                    err_msg = f"HTTP {r_info.status_code}: {r_info.text[:80]}"
+            elif r_err:
+                err_msg = f"{r_err}\n\n💡 解决建议:\n1. 请在上方【网络代理】处选择本地代理 (如 127.0.0.1:7890 / 10809)；\n2. 如遇官方速率限制，可在上方输入 GitHub Token。"
 
             def _get_branch_commit_date(target_b: str) -> str:
-                try:
-                    commit_api_url = f"https://api.github.com/repos/{clean_repo}/commits/{target_b}"
-                    c_resp = requests.get(commit_api_url, headers=headers, proxies=proxies, timeout=8)
-                    if c_resp.status_code == 200:
-                        c_data = c_resp.json()
-                        commit_obj = c_data.get("commit", {})
-                        dt_str = commit_obj.get("committer", {}).get("date") or commit_obj.get("author", {}).get("date")
-                        if dt_str:
-                            return dt_str[:16].replace("T", " ")
-                except Exception:
-                    pass
+                commit_api_url = f"https://api.github.com/repos/{clean_repo}/commits/{target_b}"
+                c_resp, _ = _gh_api_get(commit_api_url, timeout=8, retries=1)
+                if c_resp is not None and c_resp.status_code == 200:
+                    c_data = c_resp.json()
+                    commit_obj = c_data.get("commit", {})
+                    dt_str = commit_obj.get("committer", {}).get("date") or commit_obj.get("author", {}).get("date")
+                    if dt_str:
+                        return dt_str[:16].replace("T", " ")
                 return repo_pushed_date if repo_pushed_date != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
             if not err_msg:
                 # 2. Release Mode or Fallback
                 if "Release" in mode:
                     api_url = f"https://api.github.com/repos/{clean_repo}/releases"
-                    try:
-                        resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=12)
+                    resp, rel_err = _gh_api_get(api_url, timeout=15, retries=2)
+                    if resp is not None:
                         if resp.status_code == 200:
                             releases = resp.json()
                             if releases:
@@ -2565,14 +2583,14 @@ def main(page: ft.Page):
                             err_msg = "GitHub API 调用频率受限，建议填入 GitHub Token！"
                         else:
                             err_msg = f"HTTP {resp.status_code}: {resp.text[:80]}"
-                    except Exception as err:
-                        err_msg = str(err)
+                    elif rel_err:
+                        err_msg = rel_err
 
                 # 3. Source Tree Mode
                 if "源码" in mode and not items_map and not err_msg:
                     api_url = f"https://api.github.com/repos/{clean_repo}/git/trees/{actual_branch}?recursive=1"
-                    try:
-                        resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=15)
+                    resp, tree_err = _gh_api_get(api_url, timeout=18, retries=2)
+                    if resp is not None:
                         if resp.status_code == 200:
                             tree = resp.json().get("tree", [])
                             nav_struct["ROOT"] = "📁 全部源码 (根目录 /)"
@@ -2597,8 +2615,8 @@ def main(page: ft.Page):
                         elif resp.status_code == 404:
                             alt_branch = "master" if actual_branch == "main" else "main"
                             alt_url = f"https://api.github.com/repos/{clean_repo}/git/trees/{alt_branch}?recursive=1"
-                            alt_resp = requests.get(alt_url, headers=headers, proxies=proxies, timeout=15)
-                            if alt_resp.status_code == 200:
+                            alt_resp, _ = _gh_api_get(alt_url, timeout=15, retries=1)
+                            if alt_resp is not None and alt_resp.status_code == 200:
                                 tree = alt_resp.json().get("tree", [])
                                 nav_struct["ROOT"] = "📁 全部源码 (根目录 /)"
                                 tf_gh_branch.value = alt_branch
@@ -2624,8 +2642,7 @@ def main(page: ft.Page):
                                 err_msg = f"未找到仓库或分支 '{actual_branch}'，请核对分支名称。"
                         else:
                             err_msg = f"HTTP {resp.status_code}: {resp.text[:80]}"
-                    except Exception as err:
-                        err_msg = str(err)
+
 
             if items_map:
                 raw_gh_items = items_map
