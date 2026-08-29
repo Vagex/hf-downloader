@@ -1937,18 +1937,36 @@ def main(page: ft.Page):
             try:
                 repo_api_url = f"https://api.github.com/repos/{clean_repo}"
                 r_info = requests.get(repo_api_url, headers=headers, proxies=proxies, timeout=10)
+                repo_pushed_date = "--"
                 if r_info.status_code == 200:
                     repo_info = r_info.json()
                     default_b = repo_info.get("default_branch") or "main"
                     if not branch_input or branch_input in ("main", "master"):
                         actual_branch = default_b
                         tf_gh_branch.value = actual_branch
+                    raw_pushed = repo_info.get("pushed_at") or repo_info.get("updated_at")
+                    if raw_pushed:
+                        repo_pushed_date = raw_pushed[:16].replace("T", " ")
                 elif r_info.status_code == 404:
                     err_msg = "未找到该 GitHub 仓库，请核对 owner/repo 拼写或确认是否为私有仓库。"
                 elif r_info.status_code == 403:
                     err_msg = "GitHub API 调用频率已达上限，请在上方输入 GitHub Token！"
             except Exception as e:
                 pass
+
+            def _get_branch_commit_date(target_b: str) -> str:
+                try:
+                    commit_api_url = f"https://api.github.com/repos/{clean_repo}/commits/{target_b}"
+                    c_resp = requests.get(commit_api_url, headers=headers, proxies=proxies, timeout=8)
+                    if c_resp.status_code == 200:
+                        c_data = c_resp.json()
+                        commit_obj = c_data.get("commit", {})
+                        dt_str = commit_obj.get("committer", {}).get("date") or commit_obj.get("author", {}).get("date")
+                        if dt_str:
+                            return dt_str[:16].replace("T", " ")
+                except Exception:
+                    pass
+                return repo_pushed_date if repo_pushed_date != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
             if not err_msg:
                 # 2. Release Mode or Fallback
@@ -2014,6 +2032,7 @@ def main(page: ft.Page):
                         if resp.status_code == 200:
                             tree = resp.json().get("tree", [])
                             nav_struct["ROOT"] = "📁 全部源码 (根目录 /)"
+                            branch_real_date = _get_branch_commit_date(actual_branch)
                             for item in tree:
                                 ipath = item.get("path")
                                 if item.get("type") == "tree":
@@ -2027,7 +2046,7 @@ def main(page: ft.Page):
                                         "scope": scope,
                                         "size_str": format_size(isize),
                                         "raw_size": isize,
-                                        "date_str": "最新",
+                                        "date_str": branch_real_date,
                                         "downloads": "--",
                                         "url": raw_url
                                     }
@@ -2039,6 +2058,7 @@ def main(page: ft.Page):
                                 tree = alt_resp.json().get("tree", [])
                                 nav_struct["ROOT"] = "📁 全部源码 (根目录 /)"
                                 tf_gh_branch.value = alt_branch
+                                alt_branch_date = _get_branch_commit_date(alt_branch)
                                 for item in tree:
                                     ipath = item.get("path")
                                     if item.get("type") == "tree":
@@ -2052,7 +2072,7 @@ def main(page: ft.Page):
                                             "scope": scope,
                                             "size_str": format_size(isize),
                                             "raw_size": isize,
-                                            "date_str": "最新",
+                                            "date_str": alt_branch_date,
                                             "downloads": "--",
                                             "url": raw_url
                                         }
@@ -2245,6 +2265,16 @@ def main(page: ft.Page):
         accel_url = get_gh_accelerated_url(raw_url)
 
         tid = (max([t.task_id for t in tasks]) + 1) if tasks else 1
+        real_zip_date = ""
+        if raw_gh_items:
+            for it in raw_gh_items.values():
+                d = it.get("date_str")
+                if d and d not in ("最新", "--"):
+                    real_zip_date = d
+                    break
+        if not real_zip_date:
+            real_zip_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
         task = QueueTask(
             task_id=tid,
             repo_id=f"🐙 {repo_id}",
@@ -2252,7 +2282,7 @@ def main(page: ft.Page):
             branch=branch,
             file_path=zip_name,
             size_str="整包源码Zip",
-            date_str="最新",
+            date_str=real_zip_date,
             dest_dir=dest_dir,
             flatten=True,
             endpoint=(dd_gh_mirror.value or "").strip(),

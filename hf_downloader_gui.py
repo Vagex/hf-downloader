@@ -2302,8 +2302,9 @@ class HFDownloaderApp(tk.Tk):
         nav_structure = {}
         err_msg = None
         actual_branch = branch_input or "main"
+        repo_pushed_date = "--"
 
-        # 1. Fetch Repository Metadata to get actual default_branch
+        # 1. Fetch Repository Metadata to get actual default_branch & real push date
         try:
             repo_api_url = f"https://api.github.com/repos/{repo_id}"
             r_info = requests.get(repo_api_url, headers=headers, proxies=proxies, timeout=10)
@@ -2313,12 +2314,29 @@ class HFDownloaderApp(tk.Tk):
                 if not branch_input or branch_input in ("main", "master"):
                     actual_branch = default_b
                     self.after(0, lambda b=actual_branch: self.gh_branch_var.set(b))
+                raw_pushed = repo_info.get("pushed_at") or repo_info.get("updated_at")
+                if raw_pushed:
+                    repo_pushed_date = raw_pushed[:16].replace("T", " ")
             elif r_info.status_code == 404:
                 err_msg = "未找到该 GitHub 仓库，请核对 owner/repo 拼写或确认是否为私有仓库。"
             elif r_info.status_code == 403:
                 err_msg = "GitHub API 调用频率已达上限，请在上方输入 GitHub Token！"
         except Exception as e:
             pass  # Fallback to direct fetch
+
+        def _get_branch_commit_date(target_b: str) -> str:
+            try:
+                commit_api_url = f"https://api.github.com/repos/{repo_id}/commits/{target_b}"
+                c_resp = requests.get(commit_api_url, headers=headers, proxies=proxies, timeout=8)
+                if c_resp.status_code == 200:
+                    c_data = c_resp.json()
+                    commit_obj = c_data.get("commit", {})
+                    dt_str = commit_obj.get("committer", {}).get("date") or commit_obj.get("author", {}).get("date")
+                    if dt_str:
+                        return dt_str[:16].replace("T", " ")
+            except Exception:
+                pass
+            return repo_pushed_date if repo_pushed_date != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
         if not err_msg:
             # 2. Release Mode or Fallback
@@ -2332,7 +2350,7 @@ class HFDownloaderApp(tk.Tk):
                             for rel in releases:
                                 tag_name = rel.get("tag_name", "未知Tag")
                                 rel_name = rel.get("name") or tag_name
-                                pub_date = (rel.get("published_at") or "--")[:16].replace("T", " ")
+                                pub_date = (rel.get("published_at") or rel.get("created_at") or repo_pushed_date)[:16].replace("T", " ")
                                 
                                 nav_structure[tag_name] = f"📦 {tag_name} ({pub_date})"
                                 
@@ -2351,7 +2369,7 @@ class HFDownloaderApp(tk.Tk):
                                 for asset in rel.get("assets", []):
                                     aname = asset.get("name")
                                     asize = asset.get("size") or 0
-                                    adate = (asset.get("updated_at") or pub_date)[:16].replace("T", " ")
+                                    adate = (asset.get("updated_at") or asset.get("created_at") or pub_date)[:16].replace("T", " ")
                                     adls = str(asset.get("download_count", 0))
                                     aurl = asset.get("browser_download_url")
 
@@ -2388,6 +2406,7 @@ class HFDownloaderApp(tk.Tk):
                         data = resp.json()
                         tree = data.get("tree", [])
                         nav_structure["ROOT"] = "📁 全部源码 (根目录 /)"
+                        branch_real_date = _get_branch_commit_date(actual_branch)
 
                         for item in tree:
                             itype = item.get("type")
@@ -2403,7 +2422,7 @@ class HFDownloaderApp(tk.Tk):
                                     "scope": scope,
                                     "size_str": self._format_size(isize),
                                     "raw_size": isize,
-                                    "date_str": "最新",
+                                    "date_str": branch_real_date,
                                     "downloads": "--",
                                     "url": raw_url
                                 }
@@ -2417,6 +2436,7 @@ class HFDownloaderApp(tk.Tk):
                             tree = data.get("tree", [])
                             nav_structure["ROOT"] = "📁 全部源码 (根目录 /)"
                             self.after(0, lambda b=alt_branch: self.gh_branch_var.set(b))
+                            alt_branch_date = _get_branch_commit_date(alt_branch)
 
                             for item in tree:
                                 itype = item.get("type")
@@ -2432,7 +2452,7 @@ class HFDownloaderApp(tk.Tk):
                                         "scope": scope,
                                         "size_str": self._format_size(isize),
                                         "raw_size": isize,
-                                        "date_str": "最新",
+                                        "date_str": alt_branch_date,
                                         "downloads": "--",
                                         "url": raw_url
                                     }
@@ -2670,6 +2690,16 @@ class HFDownloaderApp(tk.Tk):
         accel_url = self._get_accelerated_url(raw_url)
 
         task_id = self._get_next_task_id()
+        real_zip_date = ""
+        if hasattr(self, "raw_gh_items") and self.raw_gh_items:
+            for it in self.raw_gh_items.values():
+                d = it.get("date_str")
+                if d and d not in ("最新", "--"):
+                    real_zip_date = d
+                    break
+        if not real_zip_date:
+            real_zip_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
         task = QueueTask(
             task_id=task_id,
             repo_id=f"🐙 {repo_id}",
@@ -2677,7 +2707,7 @@ class HFDownloaderApp(tk.Tk):
             branch=branch,
             file_path=zip_name,
             size_str="整包源码Zip",
-            date_str="最新",
+            date_str=real_zip_date,
             dest_dir=dest_dir,
             flatten=True,
             endpoint=self.gh_mirror_var.get().strip(),
