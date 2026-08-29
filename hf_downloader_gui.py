@@ -3489,6 +3489,17 @@ class HFDownloaderApp(tk.Tk):
         endpoint = self.mirror_var.get().strip().rstrip("/")
         token = self.token_var.get().strip() or None
         proxies = self._get_request_proxies()
+        effective_proxy = self._get_effective_proxy()
+
+        # Safely set proxy environment variables for huggingface_hub
+        if effective_proxy:
+            os.environ["HTTP_PROXY"] = effective_proxy
+            os.environ["HTTPS_PROXY"] = effective_proxy
+            os.environ["http_proxy"] = effective_proxy
+            os.environ["https_proxy"] = effective_proxy
+        else:
+            for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+                os.environ.pop(k, None)
 
         files_map = {}
         err_msg = None
@@ -3511,7 +3522,7 @@ class HFDownloaderApp(tk.Tk):
             pass
 
         try:
-            api = HfApi(endpoint=endpoint, token=token, proxies=proxies)
+            api = HfApi(endpoint=endpoint, token=token)
             tree = list(api.list_repo_tree(repo_id, repo_type=repo_type, revision=branch, recursive=True, expand=True))
             for item in tree:
                 type_name = type(item).__name__
@@ -3587,7 +3598,7 @@ class HFDownloaderApp(tk.Tk):
         # Fallback 2: Repo info
         if not files_map:
             try:
-                api = HfApi(endpoint=endpoint, token=token, proxies=proxies)
+                api = HfApi(endpoint=endpoint, token=token)
                 info = api.model_info(repo_id, files_metadata=True) if repo_type == "model" else api.repo_info(repo_id, repo_type=repo_type, files_metadata=True)
                 global_date_str = self._format_date(getattr(info, "lastModified", None))
                 if global_date_str in ("--", "未知", "None", ""):

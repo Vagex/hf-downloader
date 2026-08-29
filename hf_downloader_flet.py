@@ -661,6 +661,17 @@ def main(page: ft.Page):
             endpoint = (dd_mirror.value or "https://hf-mirror.com").rstrip("/")
             token = tf_token.value.strip() or None
             proxies = get_request_proxies()
+            effective_proxy = get_effective_proxy()
+
+            # Safely set proxy environment variables for huggingface_hub
+            if effective_proxy:
+                os.environ["HTTP_PROXY"] = effective_proxy
+                os.environ["HTTPS_PROXY"] = effective_proxy
+                os.environ["http_proxy"] = effective_proxy
+                os.environ["https_proxy"] = effective_proxy
+            else:
+                for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+                    os.environ.pop(k, None)
 
             files_map = {}
             err_msg = None
@@ -683,7 +694,7 @@ def main(page: ft.Page):
                 pass
 
             try:
-                api = HfApi(endpoint=endpoint, token=token, proxies=proxies)
+                api = HfApi(endpoint=endpoint, token=token)
                 tree = list(api.list_repo_tree(repo_id, repo_type=repo_type, revision=branch, recursive=True, expand=True))
                 for item in tree:
                     if getattr(item, "type", None) == "directory":
