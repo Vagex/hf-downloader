@@ -96,16 +96,72 @@ DEFAULT_GITHUB_ACCELERATORS = [
 # Preset Directory Mappings: Display Label -> Absolute Path
 DEFAULT_COMFYUI_ROOT = r"F:\ComfyUI-aki-v3\ComfyUI\models"
 DEFAULT_CUSTOM_NODES_DIR = os.path.normpath(os.path.join(DEFAULT_COMFYUI_ROOT, "..", "custom_nodes"))
-PRESET_DIRS_MAP = {
-    "🧩 ComfyUI 插件目录 (custom_nodes)": DEFAULT_CUSTOM_NODES_DIR,
-    "🎨 扩散模型 (diffusion_models)": os.path.join(DEFAULT_COMFYUI_ROOT, "diffusion_models"),
-    "🎮 控制网络 (controlnet)": os.path.join(DEFAULT_COMFYUI_ROOT, "controlnet"),
-    "💾 大模型底模 (checkpoints)": os.path.join(DEFAULT_COMFYUI_ROOT, "checkpoints"),
-    "⚡ 微调模型 (loras)": os.path.join(DEFAULT_COMFYUI_ROOT, "loras"),
-    "🔍 变分自编码 (vae)": os.path.join(DEFAULT_COMFYUI_ROOT, "vae"),
-    "🧠 UNet 主干 (unet)": os.path.join(DEFAULT_COMFYUI_ROOT, "unet"),
-    "🔤 文本编码器 (clip)": os.path.join(DEFAULT_COMFYUI_ROOT, "clip"),
-}
+PRESETS_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_presets.json")
+
+class PresetDirectoryManager:
+    """Centralized manager for preset target directories with persistent JSON storage."""
+
+    @staticmethod
+    def get_default_presets(comfy_root: Optional[str] = None) -> Dict[str, str]:
+        root = comfy_root or DEFAULT_COMFYUI_ROOT
+        custom_nodes = os.path.normpath(os.path.join(root, "..", "custom_nodes"))
+        return {
+            "🧩 ComfyUI 插件目录 (custom_nodes)": custom_nodes,
+            "🎨 扩散模型 (diffusion_models)": os.path.join(root, "diffusion_models"),
+            "🎮 控制网络 (controlnet)": os.path.join(root, "controlnet"),
+            "💾 大模型底模 (checkpoints)": os.path.join(root, "checkpoints"),
+            "⚡ 微调模型 (loras)": os.path.join(root, "loras"),
+            "🔍 变分自编码 (vae)": os.path.join(root, "vae"),
+            "🧠 UNet 主干 (unet)": os.path.join(root, "unet"),
+            "🔤 文本编码器 (clip)": os.path.join(root, "clip"),
+            "📥 默认下载输出目录 (downloads)": os.path.join(os.path.expanduser("~"), "Downloads", "HF_Downloads"),
+        }
+
+    @classmethod
+    def load_presets(cls) -> Dict[str, str]:
+        global PRESET_DIRS_MAP
+        if os.path.exists(PRESETS_CONFIG_FILE):
+            try:
+                with open(PRESETS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and data:
+                        PRESET_DIRS_MAP = data
+                        return data
+            except Exception:
+                pass
+        defaults = cls.get_default_presets()
+        PRESET_DIRS_MAP = defaults
+        cls.save_presets(defaults)
+        return defaults
+
+    @classmethod
+    def save_presets(cls, presets: Dict[str, str]):
+        global PRESET_DIRS_MAP
+        PRESET_DIRS_MAP = presets
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(PRESETS_CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(presets, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @classmethod
+    def update_root_base(cls, new_comfy_root: str) -> Dict[str, str]:
+        current = cls.load_presets()
+        custom_nodes = os.path.normpath(os.path.join(new_comfy_root, "..", "custom_nodes"))
+        updated = {}
+        for label, path in current.items():
+            if "custom_nodes" in label:
+                updated[label] = custom_nodes
+            elif any(k in label for k in ["diffusion_models", "controlnet", "checkpoints", "loras", "vae", "unet", "clip"]):
+                folder = label.split("(")[-1].rstrip(")")
+                updated[label] = os.path.join(new_comfy_root, folder)
+            else:
+                updated[label] = path
+        cls.save_presets(updated)
+        return updated
+
+PRESET_DIRS_MAP = PresetDirectoryManager.load_presets()
 
 def center_window_on_parent(win: tk.Toplevel, parent: Optional[tk.Widget] = None, width: Optional[int] = None, height: Optional[int] = None):
     """Accurately center a child or dialog window relative to its parent window, keeping it strictly on-screen."""
@@ -806,6 +862,336 @@ class ProxyManagerDialog(tk.Toplevel):
             self.proxies = list(DEFAULT_PROXIES)
             self._refresh_listbox()
             self.on_update_callback(self.proxies)
+
+
+# ------------------ Preset Directories Visual Manager Dialog ------------------
+class PresetDirectoryManagerDialog(tk.Toplevel):
+    """Visual Dialog for managing, adding, editing, deleting and creating preset target directories."""
+
+    def __init__(self, parent, on_update_callback):
+        super().__init__(parent)
+        self.title("⚙️ 预设分类目录实时管理器 (Preset Directory Manager)")
+        self.geometry("920x580")
+        self.minsize(780, 460)
+        self.transient(parent)
+        self.grab_set()
+
+        self.on_update_callback = on_update_callback
+        self.presets: Dict[str, str] = dict(PresetDirectoryManager.load_presets())
+
+        center_window_on_parent(self, parent, 920, 580)
+        self._build_ui()
+        self._refresh_table()
+
+    def _build_ui(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Top description & Quick Action bar
+        top_bar = ttk.Frame(main_frame)
+        top_bar.pack(fill=tk.X, pady=(0, 6))
+
+        ttk.Label(
+            top_bar, 
+            text="💡 在此可自由新增、修改、重命名、删除预设分类目录，修改后全软件所有 Tab 实时生效并持久保存。", 
+            font=FONT_SMALL, 
+            foreground="#555555"
+        ).pack(side=tk.LEFT)
+
+        self.lbl_stats = ttk.Label(top_bar, text="共 0 个预设", font=FONT_BOLD, foreground="#0d6efd")
+        self.lbl_stats.pack(side=tk.RIGHT)
+
+        # 2. Main Preset Table
+        table_frame = ttk.Frame(main_frame)
+        table_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        cols = ("status", "label", "path")
+        self.tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="browse")
+
+        self.tree.heading("status", text="状态", anchor=tk.CENTER)
+        self.tree.heading("label", text="预设分类名称 / 标识 (支持Emoji与说明)", anchor=tk.W)
+        self.tree.heading("path", text="保存目标绝对路径 (本地文件夹)", anchor=tk.W)
+
+        self.tree.column("status", width=95, minwidth=80, stretch=False, anchor=tk.CENTER)
+        self.tree.column("label", width=310, minwidth=180, stretch=False, anchor=tk.W)
+        self.tree.column("path", width=460, minwidth=220, stretch=True, anchor=tk.W)
+
+        self.tree.tag_configure("ok_tag", foreground="#198754", font=FONT_TABLE_BOLD)
+        self.tree.tag_configure("missing_tag", foreground="#dc3545", font=FONT_TABLE)
+
+        scroll_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        scroll_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+
+        self.tree.grid(row=0, column=0, sticky=tk.NSEW)
+        scroll_y.grid(row=0, column=1, sticky=tk.NS)
+        scroll_x.grid(row=1, column=0, sticky=tk.EW)
+        table_frame.rowconfigure(0, weight=1)
+        table_frame.columnconfigure(0, weight=1)
+
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
+
+        # 3. Edit / Add Form Panel
+        form_frame = ttk.LabelFrame(main_frame, text=" 📝 预设分类编辑与新增表单 ", padding="8")
+        form_frame.pack(fill=tk.X, pady=(0, 8))
+
+        # Row 0: Label
+        ttk.Label(form_frame, text="分类名称:", font=FONT_BOLD).grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
+        self.edit_label_var = tk.StringVar()
+        self.entry_label = ttk.Entry(form_frame, textvariable=self.edit_label_var, font=FONT_NORMAL)
+        self.entry_label.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
+
+        # Row 1: Path & Browse
+        ttk.Label(form_frame, text="目标路径:", font=FONT_BOLD).grid(row=1, column=0, sticky=tk.W, padx=4, pady=3)
+        path_box = ttk.Frame(form_frame)
+        path_box.grid(row=1, column=1, sticky=tk.EW, padx=4, pady=3)
+
+        self.edit_path_var = tk.StringVar()
+        self.entry_path = ttk.Entry(path_box, textvariable=self.edit_path_var, font=FONT_NORMAL)
+        self.entry_path.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        btn_browse = ttk.Button(path_box, text=" 浏览文件夹...", command=self._browse_path)
+        btn_browse.pack(side=tk.RIGHT, padx=(4, 0))
+
+        form_frame.columnconfigure(1, weight=1)
+
+        # Buttons inside Form
+        form_btn_bar = ttk.Frame(form_frame)
+        form_btn_bar.grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
+
+        btn_save_item = tk.Button(
+            form_btn_bar,
+            text="💾 保存/更新当前预设",
+            font=FONT_BOLD,
+            bg="#0d6efd",
+            fg="#ffffff",
+            activebackground="#0b5ed7",
+            activeforeground="#ffffff",
+            padx=10, pady=3,
+            command=self.save_current_preset
+        )
+        btn_save_item.pack(side=tk.LEFT, padx=4)
+
+        btn_add_new = ttk.Button(form_btn_bar, text="➕ 另存为新分类", command=self.add_as_new_preset)
+        btn_add_new.pack(side=tk.LEFT, padx=4)
+
+        btn_create_dir = ttk.Button(form_btn_bar, text="📁 创建当前物理文件夹", command=self.create_current_dir)
+        btn_create_dir.pack(side=tk.LEFT, padx=4)
+
+        btn_open_dir = ttk.Button(form_btn_bar, text="📂 在资源管理器中打开", command=self.open_current_dir)
+        btn_open_dir.pack(side=tk.LEFT, padx=4)
+
+        btn_clear_form = ttk.Button(form_btn_bar, text="🧹 清空输入框", command=self._clear_form)
+        btn_clear_form.pack(side=tk.RIGHT, padx=4)
+
+        # 4. Bottom Actions Toolbar
+        bottom_bar = ttk.Frame(main_frame)
+        bottom_bar.pack(fill=tk.X)
+
+        btn_del = ttk.Button(bottom_bar, text="🗑️ 删除选中项", command=self.delete_selected_preset)
+        btn_del.pack(side=tk.LEFT, padx=2)
+
+        btn_move_up = ttk.Button(bottom_bar, text="⬆️ 上移", width=6, command=lambda: self._move_item(-1))
+        btn_move_up.pack(side=tk.LEFT, padx=2)
+
+        btn_move_down = ttk.Button(bottom_bar, text="⬇️ 下移", width=6, command=lambda: self._move_item(1))
+        btn_move_down.pack(side=tk.LEFT, padx=2)
+
+        btn_create_all = ttk.Button(bottom_bar, text="📁 一键创建全部缺失目录", command=self.create_all_missing_dirs)
+        btn_create_all.pack(side=tk.LEFT, padx=6)
+
+        btn_reset_defaults = ttk.Button(bottom_bar, text="↺ 恢复官方默认预设", command=self.reset_to_defaults)
+        btn_reset_defaults.pack(side=tk.LEFT, padx=4)
+
+        btn_close = ttk.Button(bottom_bar, text="完成并关闭", command=self.destroy)
+        btn_close.pack(side=tk.RIGHT, padx=2)
+
+    def _refresh_table(self):
+        self.tree.delete(*self.tree.get_children())
+        for i, (label, path) in enumerate(self.presets.items()):
+            exists = os.path.exists(path)
+            status_str = "✅ 已就绪" if exists else "❌ 未创建"
+            tag = "ok_tag" if exists else "missing_tag"
+            self.tree.insert("", tk.END, iid=str(i), values=(status_str, label, path), tags=(tag,))
+        self.lbl_stats.config(text=f"共 {len(self.presets)} 个预设目录")
+
+    def _on_tree_select(self, event=None):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        labels = list(self.presets.keys())
+        if 0 <= idx < len(labels):
+            lbl = labels[idx]
+            self.edit_label_var.set(lbl)
+            self.edit_path_var.set(self.presets[lbl])
+
+    def _on_tree_double_click(self, event=None):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        labels = list(self.presets.keys())
+        if 0 <= idx < len(labels):
+            lbl = labels[idx]
+            p = self.presets[lbl]
+            if os.path.exists(p):
+                os.startfile(p)
+            else:
+                if messagebox.askyesno("创建目录", f"目录不存在，是否立即创建？\n{p}", parent=self):
+                    try:
+                        os.makedirs(p, exist_ok=True)
+                        self._refresh_table()
+                        messagebox.showinfo("成功", f"目录已成功创建:\n{p}", parent=self)
+                    except Exception as e:
+                        messagebox.showerror("错误", f"创建失败: {str(e)}", parent=self)
+
+    def _browse_path(self):
+        init_dir = self.edit_path_var.get().strip()
+        if not os.path.exists(init_dir):
+            init_dir = os.path.expanduser("~")
+        d = filedialog.askdirectory(title="选择预设分类保存目录", initialdir=init_dir)
+        if d:
+            self.edit_path_var.set(os.path.normpath(d))
+
+    def _clear_form(self):
+        self.edit_label_var.set("")
+        self.edit_path_var.set("")
+        self.tree.selection_remove(self.tree.selection())
+
+    def save_current_preset(self):
+        label = self.edit_label_var.get().strip()
+        path = self.edit_path_var.get().strip()
+        if not label or not path:
+            messagebox.showwarning("提示", "分类名称和目标路径均不能为空！", parent=self)
+            return
+
+        path = os.path.normpath(path)
+        sel = self.tree.selection()
+        
+        if sel:
+            idx = int(sel[0])
+            labels = list(self.presets.keys())
+            old_label = labels[idx]
+            # Replace at same position
+            new_dict = {}
+            for k, v in self.presets.items():
+                if k == old_label:
+                    new_dict[label] = path
+                else:
+                    new_dict[k] = v
+            self.presets = new_dict
+        else:
+            self.presets[label] = path
+
+        PresetDirectoryManager.save_presets(self.presets)
+        self._refresh_table()
+        self.on_update_callback(self.presets, selected_label=label)
+        messagebox.showinfo("成功", f"预设分类【{label}】已成功保存！", parent=self)
+
+    def add_as_new_preset(self):
+        label = self.edit_label_var.get().strip()
+        path = self.edit_path_var.get().strip()
+        if not label or not path:
+            messagebox.showwarning("提示", "分类名称和目标路径均不能为空！", parent=self)
+            return
+
+        path = os.path.normpath(path)
+        if label in self.presets:
+            if not messagebox.askyesno("重名覆盖", f"已存在名为【{label}】的预设，是否覆盖其路径？", parent=self):
+                return
+
+        self.presets[label] = path
+        PresetDirectoryManager.save_presets(self.presets)
+        self._refresh_table()
+        self.on_update_callback(self.presets, selected_label=label)
+        messagebox.showinfo("成功", f"新预设分类【{label}】已添加成功！", parent=self)
+
+    def delete_selected_preset(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在上方列表中选择要删除的预设分类！", parent=self)
+            return
+        idx = int(sel[0])
+        labels = list(self.presets.keys())
+        lbl = labels[idx]
+
+        if len(self.presets) <= 1:
+            messagebox.showwarning("提示", "至少需保留一个预设分类，不可全部删除！", parent=self)
+            return
+
+        if messagebox.askyesno("确认删除", f"确定要删除预设分类【{lbl}】吗？\n（注：仅删除预设配置，不会删除硬盘上的实际文件夹）", parent=self):
+            del self.presets[lbl]
+            PresetDirectoryManager.save_presets(self.presets)
+            self._refresh_table()
+            self._clear_form()
+            self.on_update_callback(self.presets)
+
+    def create_current_dir(self):
+        path = self.edit_path_var.get().strip()
+        if not path:
+            messagebox.showwarning("提示", "请先选择或输入目标路径！", parent=self)
+            return
+        try:
+            os.makedirs(path, exist_ok=True)
+            self._refresh_table()
+            messagebox.showinfo("成功", f"物理文件夹已成功创建:\n{path}", parent=self)
+        except Exception as e:
+            messagebox.showerror("错误", f"创建目录失败: {str(e)}", parent=self)
+
+    def open_current_dir(self):
+        path = self.edit_path_var.get().strip()
+        if not path:
+            messagebox.showwarning("提示", "请先选择或输入目标路径！", parent=self)
+            return
+        if os.path.exists(path):
+            os.startfile(path)
+        else:
+            if messagebox.askyesno("目录不存在", f"目录尚不存在，是否立即创建并打开？\n{path}", parent=self):
+                try:
+                    os.makedirs(path, exist_ok=True)
+                    self._refresh_table()
+                    os.startfile(path)
+                except Exception as e:
+                    messagebox.showerror("错误", f"创建失败: {str(e)}", parent=self)
+
+    def create_all_missing_dirs(self):
+        created = 0
+        for lbl, p in self.presets.items():
+            if not os.path.exists(p):
+                try:
+                    os.makedirs(p, exist_ok=True)
+                    created += 1
+                except Exception:
+                    pass
+        self._refresh_table()
+        messagebox.showinfo("完成", f"批量创建完成！共创建/补齐 {created} 个物理文件夹。", parent=self)
+
+    def reset_to_defaults(self):
+        if messagebox.askyesno("恢复默认", "确定要恢复为 ComfyUI 官方标准默认预设目录列表吗？\n（自定义的预设将被重置）", parent=self):
+            self.presets = PresetDirectoryManager.get_default_presets()
+            PresetDirectoryManager.save_presets(self.presets)
+            self._refresh_table()
+            self._clear_form()
+            self.on_update_callback(self.presets)
+            messagebox.showinfo("完成", "已恢复为官方标准预设目录列表！", parent=self)
+
+    def _move_item(self, direction: int):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        labels = list(self.presets.keys())
+        new_idx = idx + direction
+        if 0 <= new_idx < len(labels):
+            labels[idx], labels[new_idx] = labels[new_idx], labels[idx]
+            reordered = {k: self.presets[k] for k in labels}
+            self.presets = reordered
+            PresetDirectoryManager.save_presets(self.presets)
+            self._refresh_table()
+            self.tree.selection_set(str(new_idx))
+            self.on_update_callback(self.presets)
 
 
 # ------------------ History & Starred Repository Database ------------------
@@ -1815,6 +2201,53 @@ class HFDownloaderApp(tk.Tk):
         self._save_settings()
         self.log(f"[✓] 网络代理列表已更新并永久保存 (当前共有 {len(self.proxies_list)} 个配置项)。")
 
+    # ------------------ Preset Directories Management ------------------
+    def open_preset_manager(self):
+        PresetDirectoryManagerDialog(self, on_update_callback=self._on_presets_updated)
+
+    def _on_presets_updated(self, new_presets: Dict[str, str], selected_label: Optional[str] = None):
+        global PRESET_DIRS_MAP
+        PRESET_DIRS_MAP = new_presets
+        labels = list(new_presets.keys())
+        
+        # 1. Update Tab 1 (Hugging Face)
+        if hasattr(self, "preset_combo"):
+            self.preset_combo["values"] = labels
+            ComboboxItemToolTip(self.preset_combo, PRESET_DIRS_MAP)
+            if selected_label and selected_label in new_presets:
+                self.preset_var.set(selected_label)
+                self.dest_dir_var.set(new_presets[selected_label])
+            elif self.preset_var.get() not in new_presets and labels:
+                self.preset_var.set(labels[0])
+                self.dest_dir_var.set(new_presets[labels[0]])
+
+        # 2. Update Tab 2 (GitHub)
+        if hasattr(self, "gh_preset_combo"):
+            self.gh_preset_combo["values"] = labels
+            ComboboxItemToolTip(self.gh_preset_combo, PRESET_DIRS_MAP)
+            if selected_label and selected_label in new_presets:
+                self.gh_preset_var.set(selected_label)
+                self._on_gh_preset_changed()
+            elif self.gh_preset_var.get() not in new_presets and labels:
+                self.gh_preset_var.set(labels[0])
+                self._on_gh_preset_changed()
+
+        # 3. Update Tab 3 (Twitter)
+        if hasattr(self, "tw_preset_combo"):
+            self.tw_preset_combo["values"] = labels
+            if selected_label and selected_label in new_presets:
+                self.tw_preset_var.set(selected_label)
+                self.tw_dest_path_var.set(new_presets[selected_label])
+            elif self.tw_preset_var.get() not in new_presets and labels:
+                self.tw_preset_var.set(labels[0])
+                self.tw_dest_path_var.set(new_presets[labels[0]])
+
+        # 4. Update Tab 5 (Environment Setup)
+        if hasattr(self, "tree_tab_dirs"):
+            self._refresh_tab_env_dirs()
+
+        self.log(f"[✓] 预设分类目录已实时更新 (当前共有 {len(new_presets)} 个预设路径)。")
+
     # ------------------ History & Starred Bookmarks Management ------------------
     def open_history_dialog(self, default_platform: Optional[str] = None):
         HistoryManagerDialog(self, on_load_callback=self._load_repo_from_history, default_platform=default_platform)
@@ -2067,13 +2500,16 @@ class HFDownloaderApp(tk.Tk):
         btn_browse = ttk.Button(dest_frame, text=" 浏览更改...", image=self.icons["folder"], compound=tk.LEFT, command=self.browse_dest_dir)
         btn_browse.grid(row=0, column=4, padx=4, pady=3)
 
+        btn_manage_preset = ttk.Button(dest_frame, text=" ⚙️ 管理预设...", image=self.icons["shield"], compound=tk.LEFT, command=self.open_preset_manager)
+        btn_manage_preset.grid(row=0, column=5, padx=4, pady=3)
+
         self.flatten_var = tk.BooleanVar(value=True)
         flatten_chk = ttk.Checkbutton(
             dest_frame, 
             text="扁平化保存", 
             variable=self.flatten_var
         )
-        flatten_chk.grid(row=0, column=5, sticky=tk.W, padx=(6, 4), pady=3)
+        flatten_chk.grid(row=0, column=6, sticky=tk.W, padx=(6, 4), pady=3)
         ToolTip(flatten_chk, "勾选后将文件直接保存到目标目录，不创建多层子文件夹")
 
         dest_frame.columnconfigure(3, weight=1)
@@ -2383,13 +2819,16 @@ class HFDownloaderApp(tk.Tk):
         btn_browse_gh_dest = ttk.Button(gh_dest_frame, text=" 浏览更改...", image=self.icons["folder"], compound=tk.LEFT, command=self._browse_gh_dest)
         btn_browse_gh_dest.grid(row=0, column=4, padx=4, pady=3)
 
+        btn_manage_gh_preset = ttk.Button(gh_dest_frame, text=" ⚙️ 管理预设...", image=self.icons["shield"], compound=tk.LEFT, command=self.open_preset_manager)
+        btn_manage_gh_preset.grid(row=0, column=5, padx=4, pady=3)
+
         self.gh_flatten_var = tk.BooleanVar(value=True)
         cb_gh_flatten = ttk.Checkbutton(
             gh_dest_frame, 
             text="扁平化保存", 
             variable=self.gh_flatten_var
         )
-        cb_gh_flatten.grid(row=0, column=5, sticky=tk.W, padx=(6, 4), pady=3)
+        cb_gh_flatten.grid(row=0, column=6, sticky=tk.W, padx=(6, 4), pady=3)
         ToolTip(cb_gh_flatten, "勾选后将文件直接保存到目标目录，不创建多层子文件夹")
 
         gh_dest_frame.columnconfigure(3, weight=1)
@@ -3075,6 +3514,9 @@ class HFDownloaderApp(tk.Tk):
         btn_tw_browse = ttk.Button(tw_dest_frame, text=" 浏览更改...", image=self.icons["folder"], compound=tk.LEFT, command=self.browse_tw_dest_path)
         btn_tw_browse.grid(row=0, column=4, padx=4, pady=3)
 
+        btn_manage_tw_preset = ttk.Button(tw_dest_frame, text=" ⚙️ 管理预设...", image=self.icons["shield"], compound=tk.LEFT, command=self.open_preset_manager)
+        btn_manage_tw_preset.grid(row=0, column=5, padx=4, pady=3)
+
         tw_dest_frame.columnconfigure(3, weight=1)
 
         # Panel 3: Tweet & Video Meta Summary Card
@@ -3667,6 +4109,19 @@ class HFDownloaderApp(tk.Tk):
             command=self._create_all_preset_dirs
         )
         btn_deploy_all.pack(side=tk.LEFT, padx=(4, 0))
+
+        btn_manage_presets_env = tk.Button(
+            row_cf,
+            text=" ⚙️ 实时管理维护预设分类目录 ",
+            font=FONT_BOLD,
+            bg="#0d6efd",
+            fg="#ffffff",
+            activebackground="#0b5ed7",
+            activeforeground="#ffffff",
+            padx=8, pady=2,
+            command=self.open_preset_manager
+        )
+        btn_manage_presets_env.pack(side=tk.LEFT, padx=(4, 0))
 
         # Directory status tree
         cols_dir = ("name", "status", "path", "action")

@@ -159,16 +159,56 @@ DEFAULT_PROXIES = [
 # Preset Directory Mappings: Display Label -> Absolute Path
 DEFAULT_COMFYUI_ROOT = r"F:\ComfyUI-aki-v3\ComfyUI\models"
 DEFAULT_CUSTOM_NODES_DIR = os.path.normpath(os.path.join(DEFAULT_COMFYUI_ROOT, "..", "custom_nodes"))
-PRESET_DIRS_MAP = {
-    "ComfyUI 插件目录 (custom_nodes)": DEFAULT_CUSTOM_NODES_DIR,
-    "扩散模型 (diffusion_models)": os.path.join(DEFAULT_COMFYUI_ROOT, "diffusion_models"),
-    "控制网络 (controlnet)": os.path.join(DEFAULT_COMFYUI_ROOT, "controlnet"),
-    "大模型底模 (checkpoints)": os.path.join(DEFAULT_COMFYUI_ROOT, "checkpoints"),
-    "微调模型 (loras)": os.path.join(DEFAULT_COMFYUI_ROOT, "loras"),
-    "变分自编码 (vae)": os.path.join(DEFAULT_COMFYUI_ROOT, "vae"),
-    "UNet 主干 (unet)": os.path.join(DEFAULT_COMFYUI_ROOT, "unet"),
-    "文本编码器 (clip)": os.path.join(DEFAULT_COMFYUI_ROOT, "clip"),
-}
+PRESETS_CONFIG_FILE = os.path.join(CONFIG_DIR, "hf_downloader_presets.json")
+
+class PresetDirectoryManager:
+    """Centralized manager for preset target directories with persistent JSON storage."""
+
+    @staticmethod
+    def get_default_presets(comfy_root: Optional[str] = None) -> Dict[str, str]:
+        root = comfy_root or DEFAULT_COMFYUI_ROOT
+        custom_nodes = os.path.normpath(os.path.join(root, "..", "custom_nodes"))
+        return {
+            "🧩 ComfyUI 插件目录 (custom_nodes)": custom_nodes,
+            "🎨 扩散模型 (diffusion_models)": os.path.join(root, "diffusion_models"),
+            "🎮 控制网络 (controlnet)": os.path.join(root, "controlnet"),
+            "💾 大模型底模 (checkpoints)": os.path.join(root, "checkpoints"),
+            "⚡ 微调模型 (loras)": os.path.join(root, "loras"),
+            "🔍 变分自编码 (vae)": os.path.join(root, "vae"),
+            "🧠 UNet 主干 (unet)": os.path.join(root, "unet"),
+            "🔤 文本编码器 (clip)": os.path.join(root, "clip"),
+            "📥 默认下载输出目录 (downloads)": os.path.join(os.path.expanduser("~"), "Downloads", "HF_Downloads"),
+        }
+
+    @classmethod
+    def load_presets(cls) -> Dict[str, str]:
+        global PRESET_DIRS_MAP
+        if os.path.exists(PRESETS_CONFIG_FILE):
+            try:
+                with open(PRESETS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and data:
+                        PRESET_DIRS_MAP = data
+                        return data
+            except Exception:
+                pass
+        defaults = cls.get_default_presets()
+        PRESET_DIRS_MAP = defaults
+        cls.save_presets(defaults)
+        return defaults
+
+    @classmethod
+    def save_presets(cls, presets: Dict[str, str]):
+        global PRESET_DIRS_MAP
+        PRESET_DIRS_MAP = presets
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(PRESETS_CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(presets, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+PRESET_DIRS_MAP = PresetDirectoryManager.load_presets()
 
 # Default GitHub Accelerators
 DEFAULT_GITHUB_ACCELERATORS = [
