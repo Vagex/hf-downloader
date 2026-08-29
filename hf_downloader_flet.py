@@ -633,12 +633,12 @@ def format_size(size_bytes: Optional[int]) -> str:
 def format_date(dt: Any) -> str:
     if not dt:
         return "--"
-    if isinstance(dt, datetime.datetime):
+    if isinstance(dt, datetime):
         return dt.strftime("%Y-%m-%d %H:%M")
     if isinstance(dt, str):
         try:
             clean_str = dt.replace("Z", "+00:00")
-            parsed = datetime.datetime.fromisoformat(clean_str)
+            parsed = datetime.fromisoformat(clean_str)
             return parsed.strftime("%Y-%m-%d %H:%M")
         except:
             return dt[:16] if len(dt) >= 16 else dt
@@ -1140,7 +1140,7 @@ def main(page: ft.Page):
                         raw_date = getattr(last_commit, "date", None) if last_commit else None
                         date_str = format_date(raw_date)
                         if date_str in ("--", "未知", "None", ""):
-                            date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                            date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
 
                         files_map[rfilename] = {
                             "path": rfilename,
@@ -1177,7 +1177,7 @@ def main(page: ft.Page):
                                     last_mod = item.get("lastModified")
                                     date_str = format_date(last_mod)
                                     if date_str in ("--", "未知", "None", ""):
-                                        date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                        date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
 
                                     files_map[rfilename] = {
                                         "path": rfilename,
@@ -2528,7 +2528,7 @@ def main(page: ft.Page):
                     dt_str = commit_obj.get("committer", {}).get("date") or commit_obj.get("author", {}).get("date")
                     if dt_str:
                         return dt_str[:16].replace("T", " ")
-                return repo_pushed_date if repo_pushed_date != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                return repo_pushed_date if repo_pushed_date != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
 
             if not err_msg:
                 # 2. Release Mode or Fallback
@@ -2834,7 +2834,7 @@ def main(page: ft.Page):
                     real_zip_date = d
                     break
         if not real_zip_date:
-            real_zip_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            real_zip_date = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         task = QueueTask(
             task_id=tid,

@@ -3431,7 +3431,7 @@ class HFDownloaderApp(tk.Tk):
                 dt_str = commit_obj.get("committer", {}).get("date") or commit_obj.get("author", {}).get("date")
                 if dt_str:
                     return dt_str[:16].replace("T", " ")
-            return repo_pushed_date if repo_pushed_date != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            return repo_pushed_date if repo_pushed_date != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
 
         if not err_msg:
             # 2. Release Mode or Fallback
@@ -3795,7 +3795,7 @@ class HFDownloaderApp(tk.Tk):
                     real_zip_date = d
                     break
         if not real_zip_date:
-            real_zip_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            real_zip_date = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         task = QueueTask(
             task_id=task_id,
@@ -5055,12 +5055,12 @@ class HFDownloaderApp(tk.Tk):
     def _format_date(self, dt: Any) -> str:
         if not dt:
             return "--"
-        if isinstance(dt, datetime.datetime):
+        if isinstance(dt, datetime):
             return dt.strftime("%Y-%m-%d %H:%M")
         if isinstance(dt, str):
             try:
                 clean_str = dt.replace("Z", "+00:00")
-                parsed = datetime.datetime.fromisoformat(clean_str)
+                parsed = datetime.fromisoformat(clean_str)
                 return parsed.strftime("%Y-%m-%d %H:%M")
             except:
                 return dt[:16] if len(dt) >= 16 else dt
@@ -5150,7 +5150,7 @@ class HFDownloaderApp(tk.Tk):
                     raw_date = getattr(last_commit, "date", None) if last_commit else None
                     date_str = self._format_date(raw_date)
                     if date_str in ("--", "未知", "None", ""):
-                        date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                        date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
 
                     files_map[rfilename] = {
                         "path": rfilename,
@@ -5188,7 +5188,7 @@ class HFDownloaderApp(tk.Tk):
                                 last_mod = item.get("lastModified")
                                 date_str = self._format_date(last_mod)
                                 if date_str in ("--", "未知", "None", ""):
-                                    date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
 
                                 files_map[rfilename] = {
                                     "path": rfilename,
@@ -5208,7 +5208,7 @@ class HFDownloaderApp(tk.Tk):
                 info = api.model_info(repo_id, files_metadata=True) if repo_type == "model" else api.repo_info(repo_id, repo_type=repo_type, files_metadata=True)
                 global_date_str = self._format_date(getattr(info, "lastModified", None))
                 if global_date_str in ("--", "未知", "None", ""):
-                    global_date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    global_date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.now().strftime("%Y-%m-%d %H:%M")
                 
                 for item in info.siblings:
                     rfilename = getattr(item, "rfilename", None) or getattr(item, "path", None)
