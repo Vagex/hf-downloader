@@ -665,6 +665,23 @@ def main(page: ft.Page):
             files_map = {}
             err_msg = None
 
+            # Fetch global repo real date for accurate fallback
+            repo_real_date_str = "--"
+            try:
+                base_type = "models" if repo_type == "model" else (repo_type + "s" if not repo_type.endswith("s") else repo_type)
+                info_url = f"{endpoint}/api/{base_type}/{repo_id}"
+                headers = {"User-Agent": "HF-Downloader-Flet/1.0"}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                resp_info = requests.get(info_url, headers=headers, proxies=proxies, timeout=8)
+                if resp_info.status_code == 200:
+                    inf = resp_info.json()
+                    raw_mod = inf.get("lastModified") or inf.get("createdAt")
+                    if raw_mod:
+                        repo_real_date_str = format_date(raw_mod)
+            except Exception:
+                pass
+
             try:
                 api = HfApi(endpoint=endpoint, token=token, proxies=proxies)
                 tree = list(api.list_repo_tree(repo_id, repo_type=repo_type, revision=branch, recursive=True, expand=True))
@@ -684,13 +701,15 @@ def main(page: ft.Page):
                         last_commit = getattr(item, "last_commit", None)
                         raw_date = getattr(last_commit, "date", None) if last_commit else None
                         date_str = format_date(raw_date)
+                        if date_str in ("--", "未知", "None", ""):
+                            date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
                         files_map[rfilename] = {
                             "path": rfilename,
                             "size_str": size_str,
                             "date_str": date_str,
                             "raw_size": raw_size or 0,
-                            "raw_date": raw_date
+                            "raw_date": raw_date or repo_real_date_str
                         }
             except Exception as e1:
                 err_msg = str(e1)
@@ -719,12 +738,15 @@ def main(page: ft.Page):
                                     size_str = format_size(raw_size)
                                     last_mod = item.get("lastModified")
                                     date_str = format_date(last_mod)
+                                    if date_str in ("--", "未知", "None", ""):
+                                        date_str = repo_real_date_str if repo_real_date_str != "--" else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
                                     files_map[rfilename] = {
                                         "path": rfilename,
                                         "size_str": size_str,
                                         "date_str": date_str,
                                         "raw_size": raw_size or 0,
-                                        "raw_date": last_mod
+                                        "raw_date": last_mod or repo_real_date_str
                                     }
                             err_msg = None
                 except Exception as e2:
