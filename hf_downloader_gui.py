@@ -3060,9 +3060,12 @@ class HFDownloaderApp(tk.Tk):
         btn_tw_open_folder = ttk.Button(tw_toolbar, text=" 打开保存目录", image=self.icons["folder"], compound=tk.LEFT, command=lambda: self._open_folder(self.tw_dest_path_var.get()))
         btn_tw_open_folder.pack(side=tk.RIGHT, padx=2)
 
-        # Treeview for video variants
+        # Treeview Container for video variants (Unified with Tab 1 & Tab 2)
+        tw_file_container = ttk.Frame(tw_lower)
+        tw_file_container.pack(fill=tk.BOTH, expand=True)
+
         cols = ("chk", "quality", "bitrate", "size", "filename")
-        self.tree_tw_variants = ttk.Treeview(tw_lower, columns=cols, show="headings", selectmode="extended")
+        self.tree_tw_variants = ttk.Treeview(tw_file_container, columns=cols, show="headings", selectmode="extended")
         
         self.tree_tw_variants.heading("chk", text="☑ 勾选", anchor=tk.CENTER)
         self.tree_tw_variants.heading("quality", text="清晰度 / 画质规格", anchor=tk.W)
@@ -3079,13 +3082,11 @@ class HFDownloaderApp(tk.Tk):
         self.tree_tw_variants.tag_configure("checked_tag", foreground="#198754", font=FONT_TABLE_BOLD)
         self.tree_tw_variants.tag_configure("file_tag", foreground="#212529", font=FONT_TABLE)
 
-        tw_scroll_y = ttk.Scrollbar(tw_lower, orient=tk.VERTICAL, command=self.tree_tw_variants.yview)
-        tw_scroll_x = ttk.Scrollbar(tw_lower, orient=tk.HORIZONTAL, command=self.tree_tw_variants.xview)
-        self.tree_tw_variants.configure(yscrollcommand=tw_scroll_y.set, xscrollcommand=tw_scroll_x.set)
+        tw_scroll_y = ttk.Scrollbar(tw_file_container, orient=tk.VERTICAL, command=self.tree_tw_variants.yview)
+        self.tree_tw_variants.configure(yscrollcommand=tw_scroll_y.set)
 
         self.tree_tw_variants.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tw_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        tw_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.tree_tw_variants.bind("<Button-1>", self._on_tw_tree_click)
         self.tree_tw_variants.bind("<space>", self._on_tw_tree_space)
