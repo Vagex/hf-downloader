@@ -50,7 +50,9 @@ DEFAULT_PROXIES = [
 
 # Preset Directory Mappings: Display Label -> Absolute Path
 DEFAULT_COMFYUI_ROOT = r"F:\ComfyUI-aki-v3\ComfyUI\models"
+DEFAULT_CUSTOM_NODES_DIR = os.path.normpath(os.path.join(DEFAULT_COMFYUI_ROOT, "..", "custom_nodes"))
 PRESET_DIRS_MAP = {
+    "ComfyUI 插件目录 (custom_nodes)": DEFAULT_CUSTOM_NODES_DIR,
     "扩散模型 (diffusion_models)": os.path.join(DEFAULT_COMFYUI_ROOT, "diffusion_models"),
     "控制网络 (controlnet)": os.path.join(DEFAULT_COMFYUI_ROOT, "controlnet"),
     "大模型底模 (checkpoints)": os.path.join(DEFAULT_COMFYUI_ROOT, "checkpoints"),
@@ -59,6 +61,15 @@ PRESET_DIRS_MAP = {
     "UNet 主干 (unet)": os.path.join(DEFAULT_COMFYUI_ROOT, "unet"),
     "文本编码器 (clip)": os.path.join(DEFAULT_COMFYUI_ROOT, "clip"),
 }
+
+# Default GitHub Accelerators
+DEFAULT_GITHUB_ACCELERATORS = [
+    "https://ghproxy.net/",
+    "https://github.moeyy.xyz/",
+    "https://mirror.ghproxy.com/",
+    "https://ghfast.top/",
+    "不使用加速 (官方直连)"
+]
 
 # Modern Professional Color Palette
 COLOR_BG_DARK = "#090d16"         # App Background
@@ -104,7 +115,8 @@ class QueueTask:
     def __init__(self, task_id: int, repo_id: str, repo_type: str, branch: str, 
                  file_path: str, size_str: str, date_str: str, dest_dir: str, flatten: bool, 
                  endpoint: str, token: Optional[str], proxy: Optional[str] = None, 
-                 status: str = "等待中", progress: float = 0.0, total_bytes: Optional[int] = None):
+                 status: str = "等待中", progress: float = 0.0, total_bytes: Optional[int] = None,
+                 platform: str = "hf", direct_url: Optional[str] = None):
         self.task_id = task_id
         self.repo_id = repo_id
         self.repo_type = repo_type
@@ -117,6 +129,8 @@ class QueueTask:
         self.endpoint = endpoint
         self.token = token
         self.proxy = proxy
+        self.platform = platform
+        self.direct_url = direct_url
         
         self.status = status
         self.progress = progress
@@ -191,6 +205,8 @@ class QueueTask:
             "endpoint": self.endpoint,
             "token": self.token,
             "proxy": self.proxy,
+            "platform": self.platform,
+            "direct_url": self.direct_url,
             "status": "已中断" if self.status == "下载中" else self.status,
             "progress": self.progress,
             "total_bytes": self.total_bytes
@@ -211,6 +227,8 @@ class QueueTask:
             endpoint=data.get("endpoint", "https://hf-mirror.com"),
             token=data.get("token"),
             proxy=data.get("proxy"),
+            platform=data.get("platform", "hf"),
+            direct_url=data.get("direct_url"),
             status=data.get("status", "等待中"),
             progress=data.get("progress", 0.0),
             total_bytes=data.get("total_bytes")
@@ -1061,7 +1079,9 @@ def main(page: ft.Page):
             target_file_path = current_task.get_dest_file_path()
             os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
 
-            if current_task.repo_type == "model":
+            if current_task.direct_url:
+                download_url = current_task.direct_url
+            elif current_task.repo_type == "model":
                 download_url = f"{current_task.endpoint}/{current_task.repo_id}/resolve/{current_task.branch}/{current_task.file_path}"
             elif current_task.repo_type == "dataset":
                 download_url = f"{current_task.endpoint}/datasets/{current_task.repo_id}/resolve/{current_task.branch}/{current_task.file_path}"
@@ -1070,7 +1090,7 @@ def main(page: ft.Page):
 
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HF-Downloader/1.0"}
             if current_task.token:
-                headers["Authorization"] = f"Bearer {current_task.token}"
+                headers["Authorization"] = f"Bearer {current_task.token}" if current_task.platform != "github" else f"token {current_task.token}"
 
             proxy_str = current_task.proxy or get_effective_proxy()
             proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
@@ -1505,39 +1525,473 @@ def main(page: ft.Page):
         )
     ], expand=True, spacing=6)
 
+    # ------------------ GitHub Explorer UI & Logic ------------------
+    tf_gh_repo = ft.TextField(value="comfyanonymous/ComfyUI", label=None, dense=True, text_size=12, expand=3, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4))
+    dd_gh_mode = ft.Dropdown(
+        options=[ft.dropdown.Option("Release 发布包"), ft.dropdown.Option("源码目录树")],
+        value="Release 发布包", dense=True, text_size=12, width=130, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4)
+    )
+    tf_gh_branch = ft.TextField(value="master", label=None, dense=True, text_size=12, width=100, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4))
+    
+    dd_gh_mirror = ft.Dropdown(
+        options=[ft.dropdown.Option(m) for m in DEFAULT_GITHUB_ACCELERATORS],
+        value=DEFAULT_GITHUB_ACCELERATORS[0], dense=True, text_size=12, expand=3, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4)
+    )
+    tf_gh_token = ft.TextField(value="", label=None, password=True, can_reveal_password=True, dense=True, text_size=12, expand=2, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4))
+    
+    def on_gh_preset_change(e):
+        pname = dd_gh_preset.value
+        if pname in PRESET_DIRS_MAP:
+            rname = (tf_gh_repo.value or "").strip().split("/")[-1] or "download"
+            base_dir = PRESET_DIRS_MAP[pname]
+            if "custom_nodes" in pname:
+                tf_gh_dest.value = os.path.normpath(os.path.join(base_dir, rname))
+            else:
+                tf_gh_dest.value = base_dir
+            page.update()
+
+    dd_gh_preset = ft.Dropdown(
+        options=[ft.dropdown.Option(k) for k in PRESET_DIRS_MAP.keys()],
+        value=list(PRESET_DIRS_MAP.keys())[0], dense=True, text_size=12, width=220, height=38,
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=4)
+    )
+    dd_gh_preset.on_change = on_gh_preset_change
+    tf_gh_dest = ft.TextField(value=DEFAULT_CUSTOM_NODES_DIR, label=None, dense=True, text_size=12, expand=True, height=38, content_padding=ft.Padding.symmetric(horizontal=8, vertical=4))
+    cb_gh_flatten = ft.Checkbox(label="扁平化保存", value=True)
+
+    lbl_gh_current_scope = ft.Text("当前位置: 未获取资源", size=12, weight=ft.FontWeight.BOLD, color=COLOR_ACCENT)
+    lbl_gh_checked_count = ft.Text("[已勾选: 0 项]", size=12, weight=ft.FontWeight.BOLD, color=COLOR_SUCCESS)
+
+    col_gh_nav = ft.ListView(expand=True, spacing=2)
+    col_gh_files = ft.ListView(expand=True, spacing=2)
+
+    raw_gh_items = {}
+    gh_nav_structure = {}
+    checked_gh_items = set()
+
+    def get_gh_accelerated_url(raw_url: str) -> str:
+        accel = (dd_gh_mirror.value or "").strip()
+        if not accel or "不使用" in accel or "直连" in accel:
+            return raw_url
+        accel = accel.rstrip("/") + "/"
+        return accel + raw_url
+
+    def test_gh_node(e):
+        node = (dd_gh_mirror.value or "").strip()
+        log(f"[*] 正在测试 GitHub 加速节点: {node}...")
+        show_snack(f"正在测试加速节点: {node}...")
+
+        def _worker():
+            test_url = get_gh_accelerated_url("https://raw.githubusercontent.com/comfyanonymous/ComfyUI/master/README.md")
+            proxies = get_request_proxies()
+            try:
+                t0 = time.time()
+                resp = requests.head(test_url, proxies=proxies, timeout=8, allow_redirects=True)
+                cost = (time.time() - t0) * 1000
+                if resp.status_code in (200, 301, 302):
+                    show_snack(f"GitHub 节点正常！响应延迟: {cost:.0f} ms")
+                    log(f"[✓] GitHub 加速节点测试成功: 延迟 {cost:.0f} ms")
+                else:
+                    show_snack(f"节点返回 HTTP {resp.status_code}，建议更换节点", is_error=True)
+            except Exception as err:
+                show_snack(f"节点连接失败: {str(err)}", is_error=True)
+                log(f"[✗] GitHub 节点连接失败: {str(err)}")
+            page.update()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def start_fetch_gh(e=None):
+        repo_id = (tf_gh_repo.value or "").strip()
+        if not repo_id or "/" not in repo_id:
+            show_snack("请输入有效的 GitHub 仓库名 (格式: owner/repo)！", is_error=True)
+            return
+
+        on_gh_preset_change(None)
+        btn_gh_fetch.disabled = True
+        lbl_global_status.value = f"状态: 正在获取 GitHub [{repo_id}] 资源..."
+        log(f"\n[*] 正在查询 GitHub 仓库 '{repo_id}' 资源...")
+        page.update()
+
+        def _worker():
+            nonlocal raw_gh_items, gh_nav_structure
+            mode = dd_gh_mode.value or "Release 发布包"
+            branch = (tf_gh_branch.value or "master").strip()
+            token = (tf_gh_token.value or "").strip() or None
+            proxies = get_request_proxies()
+
+            headers = {"User-Agent": "HF-Flet-Downloader", "Accept": "application/vnd.github.v3+json"}
+            if token:
+                headers["Authorization"] = f"token {token}"
+
+            items_map = {}
+            nav_struct = {}
+            err_msg = None
+
+            if "Release" in mode:
+                api_url = f"https://api.github.com/repos/{repo_id}/releases"
+                try:
+                    resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=12)
+                    if resp.status_code == 200:
+                        releases = resp.json()
+                        for rel in releases:
+                            tag_name = rel.get("tag_name", "未知Tag")
+                            pub_date = (rel.get("published_at") or "--")[:16].replace("T", " ")
+                            nav_struct[tag_name] = f"📦 {tag_name} ({pub_date})"
+
+                            zipball = rel.get("zipball_url") or f"https://github.com/{repo_id}/archive/refs/tags/{tag_name}.zip"
+                            key_zip = f"{tag_name}/[Source code] {repo_id.split('/')[-1]}-{tag_name}.zip"
+                            items_map[key_zip] = {
+                                "name": f"[源码包] {repo_id.split('/')[-1]}-{tag_name}.zip",
+                                "scope": tag_name,
+                                "size_str": "整包Zip",
+                                "raw_size": 0,
+                                "date_str": pub_date,
+                                "downloads": "--",
+                                "url": zipball
+                            }
+
+                            for asset in rel.get("assets", []):
+                                aname = asset.get("name")
+                                asize = asset.get("size") or 0
+                                adate = (asset.get("updated_at") or pub_date)[:16].replace("T", " ")
+                                adls = str(asset.get("download_count", 0))
+                                aurl = asset.get("browser_download_url")
+
+                                key = f"{tag_name}/{aname}"
+                                items_map[key] = {
+                                    "name": aname,
+                                    "scope": tag_name,
+                                    "size_str": format_size(asize),
+                                    "raw_size": asize,
+                                    "date_str": adate,
+                                    "downloads": adls,
+                                    "url": aurl
+                                }
+                    else:
+                        err_msg = f"HTTP {resp.status_code}: {resp.text[:80]}"
+                except Exception as err:
+                    err_msg = str(err)
+            else:
+                api_url = f"https://api.github.com/repos/{repo_id}/git/trees/{branch}?recursive=1"
+                try:
+                    resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=15)
+                    if resp.status_code == 200:
+                        tree = resp.json().get("tree", [])
+                        nav_struct["ROOT"] = "📁 全部源码 (根目录 /)"
+                        for item in tree:
+                            ipath = item.get("path")
+                            if item.get("type") == "tree":
+                                nav_struct[ipath] = f"📁 {ipath}"
+                            elif item.get("type") == "blob":
+                                isize = item.get("size") or 0
+                                raw_url = f"https://raw.githubusercontent.com/{repo_id}/{branch}/{ipath}"
+                                scope = os.path.dirname(ipath) if "/" in ipath else "ROOT"
+                                items_map[ipath] = {
+                                    "name": ipath,
+                                    "scope": scope,
+                                    "size_str": format_size(isize),
+                                    "raw_size": isize,
+                                    "date_str": "--",
+                                    "downloads": "--",
+                                    "url": raw_url
+                                }
+                    else:
+                        err_msg = f"HTTP {resp.status_code}: {resp.text[:80]}"
+                except Exception as err:
+                    err_msg = str(err)
+
+            if items_map:
+                raw_gh_items = items_map
+                gh_nav_structure = nav_struct
+                checked_gh_items.clear()
+                populate_gh_views()
+                log(f"[✓] 成功获取 GitHub {len(items_map)} 项资源。")
+                lbl_global_status.value = f"状态: 共检索到 {len(items_map)} 项 GitHub 资源"
+            else:
+                show_snack(f"获取失败: {err_msg}", is_error=True)
+                log(f"[✗] 获取 GitHub 资源失败: {err_msg}")
+                lbl_global_status.value = "状态: 获取 GitHub 资源失败"
+
+            btn_gh_fetch.disabled = False
+            page.update()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def populate_gh_views():
+        col_gh_nav.controls.clear()
+        first_scope = None
+        for key, label in gh_nav_structure.items():
+            if first_scope is None:
+                first_scope = key
+            btn_n = ft.TextButton(
+                label, style=ft.ButtonStyle(alignment=ft.alignment.center_left),
+                on_click=lambda e, k=key: render_gh_scope(k)
+            )
+            col_gh_nav.controls.append(btn_n)
+
+        if first_scope:
+            render_gh_scope(first_scope)
+        page.update()
+
+    def render_gh_scope(scope: str):
+        lbl_gh_current_scope.value = f"当前位置: {scope}"
+        col_gh_files.controls.clear()
+
+        for key, item in raw_gh_items.items():
+            if item["scope"] == scope or scope == "ROOT":
+                is_chk = key in checked_gh_items
+                
+                cb = ft.Checkbox(value=is_chk, on_change=lambda e, k=key: toggle_gh_check(k))
+                row = ft.Container(
+                    content=ft.Row([
+                        cb,
+                        ft.Text(item["name"], weight=ft.FontWeight.BOLD, size=12, expand=4),
+                        ft.Text(item["size_str"], size=12, color=COLOR_ACCENT, width=90),
+                        ft.Text(item["date_str"], size=12, color=COLOR_TEXT_SECONDARY, width=130),
+                        ft.Text(f"下载:{item['downloads']}", size=11, color=COLOR_SUCCESS, width=80),
+                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    bgcolor=COLOR_ACTIVE if is_chk else None,
+                    border_radius=4,
+                    padding=ft.Padding.symmetric(horizontal=6, vertical=3),
+                    on_click=lambda e, k=key: toggle_gh_check(k)
+                )
+                col_gh_files.controls.append(row)
+
+        update_gh_checked_label()
+        page.update()
+
+    def toggle_gh_check(key: str):
+        if key in checked_gh_items:
+            checked_gh_items.remove(key)
+        else:
+            checked_gh_items.add(key)
+        update_gh_checked_label()
+        # Rerender current scope
+        scope = lbl_gh_current_scope.value.replace("当前位置: ", "")
+        render_gh_scope(scope)
+
+    def update_gh_checked_label():
+        lbl_gh_checked_count.value = f"[已勾选: {len(checked_gh_items)} 项]"
+
+    def check_all_gh(e):
+        scope = lbl_gh_current_scope.value.replace("当前位置: ", "")
+        for key, item in raw_gh_items.items():
+            if item["scope"] == scope or scope == "ROOT":
+                checked_gh_items.add(key)
+        render_gh_scope(scope)
+
+    def uncheck_all_gh(e):
+        scope = lbl_gh_current_scope.value.replace("当前位置: ", "")
+        for key, item in raw_gh_items.items():
+            if item["scope"] == scope or scope == "ROOT":
+                checked_gh_items.discard(key)
+        render_gh_scope(scope)
+
+    def add_gh_to_queue(jump: bool = False):
+        if not checked_gh_items:
+            show_snack("请先在右侧勾选需要下载的 GitHub 文件或资源！", is_error=True)
+            return
+
+        dest_dir = (tf_gh_dest.value or "").strip()
+        if not dest_dir:
+            show_snack("请指定保存目标路径！", is_error=True)
+            return
+
+        os.makedirs(dest_dir, exist_ok=True)
+        repo_id = (tf_gh_repo.value or "").strip()
+        token = (tf_gh_token.value or "").strip() or None
+        proxy = get_effective_proxy()
+        flatten = cb_gh_flatten.value
+
+        added_cnt = 0
+        for key in list(checked_gh_items):
+            item = raw_gh_items.get(key)
+            if not item:
+                continue
+
+            raw_url = item["url"]
+            accel_url = get_gh_accelerated_url(raw_url)
+            fname = os.path.basename(item["name"])
+
+            exists = any(t.platform == "github" and t.direct_url == accel_url and t.dest_dir == dest_dir for t in tasks)
+            if exists:
+                continue
+
+            tid = (max([t.task_id for t in tasks]) + 1) if tasks else 1
+            task = QueueTask(
+                task_id=tid,
+                repo_id=f"🐙 {repo_id}",
+                repo_type="github",
+                branch=(tf_gh_branch.value or "master").strip(),
+                file_path=fname,
+                size_str=item["size_str"],
+                date_str=item["date_str"],
+                dest_dir=dest_dir,
+                flatten=flatten,
+                endpoint=(dd_gh_mirror.value or "").strip(),
+                token=token,
+                proxy=proxy,
+                status="等待中",
+                progress=0.0,
+                total_bytes=item["raw_size"] if item["raw_size"] > 0 else None,
+                platform="github",
+                direct_url=accel_url
+            )
+            tasks.append(task)
+            added_cnt += 1
+
+        save_tasks()
+        refresh_queue_view()
+        update_queue_tab_badge()
+        show_snack(f"成功将 {added_cnt} 个 GitHub 资源加入统一下载队列！")
+        log(f"[✓] 成功将 {added_cnt} 个 GitHub 资源加入下载队列！")
+
+        if jump:
+            switch_to_tab("queue")
+
+    def download_gh_zip(e):
+        repo_id = (tf_gh_repo.value or "").strip()
+        if not repo_id or "/" not in repo_id:
+            show_snack("请输入有效的 GitHub 仓库名！", is_error=True)
+            return
+
+        branch = (tf_gh_branch.value or "master").strip()
+        dest_dir = (tf_gh_dest.value or "").strip()
+        os.makedirs(dest_dir, exist_ok=True)
+
+        repo_name = repo_id.split("/")[-1]
+        zip_name = f"{repo_name}-{branch}.zip"
+        raw_url = f"https://github.com/{repo_id}/archive/refs/heads/{branch}.zip"
+        accel_url = get_gh_accelerated_url(raw_url)
+
+        tid = (max([t.task_id for t in tasks]) + 1) if tasks else 1
+        task = QueueTask(
+            task_id=tid,
+            repo_id=f"🐙 {repo_id}",
+            repo_type="github_zip",
+            branch=branch,
+            file_path=zip_name,
+            size_str="整包源码Zip",
+            date_str="最新",
+            dest_dir=dest_dir,
+            flatten=True,
+            endpoint=(dd_gh_mirror.value or "").strip(),
+            token=(tf_gh_token.value or "").strip() or None,
+            proxy=get_effective_proxy(),
+            status="等待中",
+            progress=0.0,
+            platform="github",
+            direct_url=accel_url
+        )
+        tasks.append(task)
+        save_tasks()
+        refresh_queue_view()
+        update_queue_tab_badge()
+        show_snack(f"已添加整包源码 Zip 任务: {zip_name}")
+        log(f"[✓] 已添加 GitHub 仓库整包源码 Zip 任务: {zip_name}")
+        switch_to_tab("queue")
+
+    btn_gh_fetch = ft.ElevatedButton("获取 GitHub 资源", icon=ft.Icons.SEARCH, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=start_fetch_gh, height=38)
+
+    # Top Configuration Card for GitHub (Strict 38px Grid)
+    top_gh_config_container = ft.Container(
+        content=ft.Column([
+            ft.Row([
+                ft.Text("仓库:", size=13, weight=ft.FontWeight.BOLD), tf_gh_repo,
+                ft.Text("模式:", size=13, weight=ft.FontWeight.BOLD), dd_gh_mode,
+                ft.Text("分支/Tag:", size=13, weight=ft.FontWeight.BOLD), tf_gh_branch,
+                btn_gh_fetch
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Row([
+                ft.Text("加速节点:", size=13, weight=ft.FontWeight.BOLD), dd_gh_mirror,
+                ft.Text("GitHub Token:", size=13, weight=ft.FontWeight.BOLD), tf_gh_token,
+                ft.ElevatedButton("检测加速节点", icon=ft.Icons.BOLT, on_click=test_gh_node, height=38)
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.Row([
+                ft.Text("分类预设:", size=13, weight=ft.FontWeight.BOLD), dd_gh_preset,
+                ft.Text("保存路径:", size=13, weight=ft.FontWeight.BOLD), tf_gh_dest,
+                cb_gh_flatten
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        ], spacing=6),
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border_radius=8,
+        padding=10
+    )
+
+    tab_github_view = ft.Column([
+        top_gh_config_container,
+        ft.Container(
+            content=ft.Row([
+                lbl_gh_current_scope,
+                lbl_gh_checked_count,
+                ft.Container(expand=True),
+                ft.ElevatedButton("全选可见", icon=ft.Icons.SELECT_ALL, on_click=check_all_gh, height=36),
+                ft.ElevatedButton("取消勾选", icon=ft.Icons.DESELECT, on_click=uncheck_all_gh, height=36),
+            ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2)
+        ),
+        ft.Row([
+            ft.Container(
+                content=ft.Column([
+                    ft.Container(
+                        content=ft.Text("📁 Release版本 / 源码目录树", weight=ft.FontWeight.BOLD, size=12),
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=7)
+                    ),
+                    col_gh_nav
+                ], expand=True),
+                width=300, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=6
+            ),
+            ft.Container(
+                content=col_gh_files,
+                expand=True, border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT), border_radius=6
+            )
+        ], expand=True, spacing=6),
+        ft.Row([
+            ft.ElevatedButton("加入统一下载队列", icon=ft.Icons.DOWNLOAD, bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE, on_click=lambda e: add_gh_to_queue(False), height=38),
+            ft.ElevatedButton("📦 下载整包源码 Zip (含加速)", icon=ft.Icons.ROCKET_LAUNCH, on_click=download_gh_zip, height=38),
+            ft.ElevatedButton("入队并跳转到队列", icon=ft.Icons.PLAY_ARROW, on_click=lambda e: add_gh_to_queue(True), height=38),
+        ], spacing=8)
+    ], expand=True, spacing=6)
+
     content_area = ft.Container(content=tab_browser_view, expand=True)
 
     def update_queue_tab_badge():
         pending_cnt = sum(1 for t in tasks if t.status in ("等待中", "下载中", "已中断"))
-        btn_nav_queue.text = f"下载任务队列 ({pending_cnt})"
+        btn_nav_queue.text = f"统一下载队列 ({pending_cnt})"
         page.update()
 
     def switch_to_tab(tab_name: str):
+        btn_nav_browse.style = None
+        btn_nav_github.style = None
+        btn_nav_queue.style = None
+        btn_nav_env.style = None
+
         if tab_name == "browse":
             btn_nav_browse.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
-            btn_nav_queue.style = None
-            btn_nav_env.style = None
             content_area.content = tab_browser_view
+        elif tab_name == "github":
+            btn_nav_github.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
+            content_area.content = tab_github_view
         elif tab_name == "queue":
-            btn_nav_browse.style = None
             btn_nav_queue.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
-            btn_nav_env.style = None
             content_area.content = tab_queue_view
         else:
-            btn_nav_browse.style = None
-            btn_nav_queue.style = None
             btn_nav_env.style = ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE)
             content_area.content = tab_env_view
             refresh_env_dirs_view()
         page.update()
 
     btn_nav_browse = ft.ElevatedButton(
-        "仓库文件浏览器", icon=ft.Icons.FOLDER_COPY,
+        "HuggingFace 浏览器", icon=ft.Icons.FOLDER_COPY,
         style=ft.ButtonStyle(bgcolor=COLOR_ACCENT, color=ft.Colors.WHITE),
         on_click=lambda e: switch_to_tab("browse"), height=38
     )
+    btn_nav_github = ft.ElevatedButton(
+        "GitHub 资源浏览器", icon=ft.Icons.AUTO_AWESOME_MOTION,
+        on_click=lambda e: switch_to_tab("github"), height=38
+    )
     btn_nav_queue = ft.ElevatedButton(
-        "下载任务队列 (0)", icon=ft.Icons.FORMAT_LIST_BULLETED,
+        "统一下载队列 (0)", icon=ft.Icons.FORMAT_LIST_BULLETED,
         on_click=lambda e: switch_to_tab("queue"), height=38
     )
     btn_nav_env = ft.ElevatedButton(
@@ -1554,6 +2008,7 @@ def main(page: ft.Page):
     nav_bar = ft.Container(
         content=ft.Row([
             btn_nav_browse,
+            btn_nav_github,
             btn_nav_queue,
             btn_nav_env,
             ft.Container(expand=True),  # Push controls to the right
