@@ -2769,6 +2769,19 @@ class QueueTask:
 
         if os.path.exists(dest_file):
             size = os.path.getsize(dest_file)
+            # If total_bytes is known and local file is truncated (smaller than total_bytes), recover to .downloading for resume
+            if self.total_bytes and self.total_bytes > 0 and size < self.total_bytes:
+                try:
+                    if not os.path.exists(temp_file):
+                        os.rename(dest_file, temp_file)
+                    else:
+                        os.remove(dest_file)
+                except Exception:
+                    pass
+                self.progress = min(99.9, (size / self.total_bytes) * 100.0)
+                self.status = "已中断"
+                return
+
             self.status = "已完成"
             self.progress = 100.0
             if not self.total_bytes or self.total_bytes == 0:
@@ -6154,7 +6167,7 @@ class HFDownloaderApp(tk.Tk):
             self.checked_tasks.difference_update(remove_set)
             self.rescan_all_tasks(silent=True)
             self.log(f"[-] 彻底删除完成: 已移除 {len(target_tasks)} 个任务，清理了 {deleted_file_count} 个实体文件及 {deleted_cache_count} 个临时缓存文件。")
-            messagebox.showinfo("彻底删除完成", f"已成功从队列移除 {len(target_tasks, parent=self)} 个任务，\n并彻底清理了 {deleted_file_count} 个本地文件与 {deleted_cache_count} 个未完成缓存文件！")
+            messagebox.showinfo("彻底删除完成", f"已成功从队列移除 {len(target_tasks)} 个任务，\n并彻底清理了 {deleted_file_count} 个本地文件与 {deleted_cache_count} 个未完成缓存文件！", parent=self)
 
         elif choice == "queue_only":
             self.tasks = [t for t in self.tasks if t.task_id not in remove_set]
@@ -6430,20 +6443,12 @@ class HFDownloaderApp(tk.Tk):
         self._update_lock_file(False)
         self.after(0, self._on_queue_finished)
 
-    def _stream_download(self, url: str, local_path: str, headers: dict, proxies: Optional[dict], task: QueueTask) -> bool:
+    def _stream_download(self, url: str, local_path: str, headers: dict, proxies: dict, task: QueueTask) -> bool:
         temp_path = local_path + ".downloading"
-        chunk_size = 1024 * 1024  # 1MB chunk
+        chunk_size = 512 * 1024  # 512KB chunk
+        max_retries = 5
 
-        req_headers = headers.copy()
-        downloaded_bytes = 0
-
-        if os.path.exists(temp_path):
-            downloaded_bytes = os.path.getsize(temp_path)
-            if downloaded_bytes > 0:
-                req_headers["Range"] = f"bytes={downloaded_bytes}-"
-                self.log(f"     [断点续传] 检测到已有缓存 {self._format_size(downloaded_bytes)}，从断点处继续...")
-
-        # Build candidate URL list for auto-failover (especially for GitHub accelerator mirrors)
+        # Build candidate URL list for auto-failover
         candidate_urls = [url]
         if task.platform == "github":
             raw_target = url
@@ -6462,78 +6467,101 @@ class HFDownloaderApp(tk.Tk):
 
         last_error = None
         for try_idx, try_url in enumerate(candidate_urls):
-            if self.cancel_current_task or self.stop_queue_requested:
-                task.error_msg = "用户取消"
-                return False
-            
-            if try_idx > 0:
-                self.log(f"     [自动故障转移] 正在尝试备用加速节点 ({try_idx+1}/{len(candidate_urls)}): {try_url[:60]}...")
-
-            try:
-                with requests.get(try_url, headers=req_headers, proxies=proxies, stream=True, timeout=25, verify=False, allow_redirects=True) as resp:
-                    if resp.status_code == 416:
-                        total_size = downloaded_bytes
-                    elif resp.status_code not in (200, 206):
-                        last_error = f"HTTP {resp.status_code}"
-                        continue
-                    else:
-                        content_length = resp.headers.get("content-length")
-                        if content_length:
-                            total_size = int(content_length) + (downloaded_bytes if resp.status_code == 206 else 0)
-                            task.total_bytes = total_size
+            retry_count = 0
+            while retry_count < max_retries:
+                if self.cancel_current_task or self.stop_queue_requested:
+                    task.error_msg = "用户取消"
+                    return False
+                
+                req_headers = headers.copy()
+                downloaded_bytes = 0
+                if os.path.exists(temp_path):
+                    downloaded_bytes = os.path.getsize(temp_path)
+                    if downloaded_bytes > 0:
+                        req_headers["Range"] = f"bytes={downloaded_bytes}-"
+                        if retry_count == 0:
+                            self.log(f"     [断点续传] 检测到已有缓存 {self._format_size(downloaded_bytes)}，从断点处继续...")
                         else:
-                            total_size = task.total_bytes
+                            self.log(f"     [自动重连] 正在从断点 {self._format_size(downloaded_bytes)} 继续重试 ({retry_count+1}/{max_retries})...")
 
-                    mode = "ab" if (resp.status_code == 206 and downloaded_bytes > 0) else "wb"
-                    if mode == "wb":
-                        downloaded_bytes = 0
+                try:
+                    with requests.get(try_url, headers=req_headers, proxies=proxies, stream=True, timeout=25, verify=False, allow_redirects=True) as resp:
+                        if resp.status_code == 416:
+                            total_size = downloaded_bytes
+                        elif resp.status_code not in (200, 206):
+                            last_error = f"HTTP {resp.status_code}"
+                            retry_count += 1
+                            time.sleep(1)
+                            continue
+                        else:
+                            content_length = resp.headers.get("content-length")
+                            if content_length:
+                                total_size = int(content_length) + (downloaded_bytes if resp.status_code == 206 else 0)
+                                task.total_bytes = total_size
+                            else:
+                                total_size = task.total_bytes
 
-                    start_time = time.time()
-                    last_update_time = start_time
-                    bytes_since_last = 0
+                        mode = "ab" if (resp.status_code == 206 and downloaded_bytes > 0) else "wb"
+                        if mode == "wb":
+                            downloaded_bytes = 0
 
-                    with open(temp_path, mode) as f:
-                        for chunk in resp.iter_content(chunk_size=chunk_size):
-                            if self.cancel_current_task or self.stop_queue_requested:
-                                task.error_msg = "用户取消"
-                                return False
-                            if chunk:
-                                f.write(chunk)
-                                downloaded_bytes += len(chunk)
-                                bytes_since_last += len(chunk)
+                        start_time = time.time()
+                        last_update_time = start_time
+                        bytes_since_last = 0
 
-                                now = time.time()
-                                if now - last_update_time >= 0.3:
-                                    dt = now - last_update_time
-                                    speed_bps = bytes_since_last / dt
-                                    speed_str = self._format_size(int(speed_bps)) + "/s"
-                                    
-                                    if total_size and total_size > 0:
-                                        pct = min(100.0, (downloaded_bytes / total_size) * 100.0)
-                                        rem_bytes = max(0, total_size - downloaded_bytes)
-                                        eta_sec = int(rem_bytes / speed_bps) if speed_bps > 0 else 0
-                                        eta_str = f"{eta_sec // 60}分{eta_sec % 60}秒" if eta_sec > 60 else f"{eta_sec}秒"
+                        with open(temp_path, mode) as f:
+                            for chunk in resp.iter_content(chunk_size=chunk_size):
+                                if self.cancel_current_task or self.stop_queue_requested:
+                                    task.error_msg = "用户取消"
+                                    return False
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded_bytes += len(chunk)
+                                    bytes_since_last += len(chunk)
+
+                                    now = time.time()
+                                    if now - last_update_time >= 0.3:
+                                        dt = now - last_update_time
+                                        speed_bps = bytes_since_last / dt if dt > 0 else 0
+                                        speed_str = self._format_size(int(speed_bps)) + "/s"
                                         
-                                        task.progress = pct
-                                        self.after(0, lambda p=pct, d=downloaded_bytes, t=total_size, s=speed_str, e=eta_str: 
-                                            self._update_progress_ui(p, d, t, s, e)
-                                        )
-                                    else:
-                                        self.after(0, lambda d=downloaded_bytes, s=speed_str: 
-                                            self._update_progress_indeterminate(d, s)
-                                        )
+                                        if total_size and total_size > 0:
+                                            pct = min(100.0, (downloaded_bytes / total_size) * 100.0)
+                                            rem_bytes = max(0, total_size - downloaded_bytes)
+                                            eta_sec = int(rem_bytes / speed_bps) if speed_bps > 0 else 0
+                                            eta_str = f"{eta_sec // 60}分{eta_sec % 60}秒" if eta_sec > 60 else f"{eta_sec}秒"
+                                            
+                                            task.progress = pct
+                                            self.after(0, lambda p=pct, d=downloaded_bytes, t=total_size, s=speed_str, e=eta_str: 
+                                                self._update_progress_ui(p, d, t, s, e)
+                                            )
+                                        else:
+                                            self.after(0, lambda d=downloaded_bytes, s=speed_str: 
+                                                self._update_progress_indeterminate(d, s)
+                                            )
 
-                                    last_update_time = now
-                                    bytes_since_last = 0
+                                        last_update_time = now
+                                        bytes_since_last = 0
 
-                if os.path.exists(local_path):
-                    os.remove(local_path)
-                os.rename(temp_path, local_path)
-                return True
+                        # STRICT COMPLETENESS VALIDATION:
+                        if total_size and total_size > 0 and downloaded_bytes < total_size:
+                            self.log(f"     [!] 网络连接中途断开 ({self._format_size(downloaded_bytes)} / {self._format_size(total_size)})，准备自动断点续传...")
+                            retry_count += 1
+                            time.sleep(1)
+                            continue
 
-            except Exception as e:
-                last_error = str(e)
-                continue
+                    # Verified full file completeness!
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                    os.rename(temp_path, local_path)
+                    task.progress = 100.0
+                    return True
+
+                except Exception as e:
+                    last_error = str(e)
+                    retry_count += 1
+                    time.sleep(1)
+                    continue
 
         task.error_msg = str(last_error)
         return False

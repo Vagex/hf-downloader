@@ -722,6 +722,18 @@ class QueueTask:
 
         if os.path.exists(dest_file):
             size = os.path.getsize(dest_file)
+            if self.total_bytes and self.total_bytes > 0 and size < self.total_bytes:
+                try:
+                    if not os.path.exists(temp_file):
+                        os.rename(dest_file, temp_file)
+                    else:
+                        os.remove(dest_file)
+                except Exception:
+                    pass
+                self.progress = min(99.9, (size / self.total_bytes) * 100.0)
+                self.status = "已中断"
+                return
+
             self.status = "已完成"
             self.progress = 100.0
             if not self.total_bytes or self.total_bytes == 0:
@@ -1790,78 +1802,99 @@ def main(page: ft.Page):
 
         last_error = None
         for try_idx, try_url in enumerate(candidate_urls):
-            if cancel_current_task or stop_queue_requested:
-                task.error_msg = "用户取消"
-                return False
+            retry_count = 0
+            while retry_count < 5:
+                if cancel_current_task or stop_queue_requested:
+                    task.error_msg = "用户取消"
+                    return False
 
-            if try_idx > 0:
-                log(f"     [自动故障转移] 尝试备用加速节点 ({try_idx+1}/{len(candidate_urls)}): {try_url[:60]}...")
-
-            try:
-                with requests.get(try_url, headers=req_headers, proxies=proxies, stream=True, timeout=25, verify=False, allow_redirects=True) as resp:
-                    if resp.status_code == 416:
-                        total_size = downloaded_bytes
-                    elif resp.status_code not in (200, 206):
-                        last_error = f"HTTP {resp.status_code}"
-                        continue
-                    else:
-                        content_length = resp.headers.get("content-length")
-                        if content_length:
-                            total_size = int(content_length) + (downloaded_bytes if resp.status_code == 206 else 0)
-                            task.total_bytes = total_size
+                req_headers = headers.copy()
+                downloaded_bytes = 0
+                if os.path.exists(temp_path):
+                    downloaded_bytes = os.path.getsize(temp_path)
+                    if downloaded_bytes > 0:
+                        req_headers["Range"] = f"bytes={downloaded_bytes}-"
+                        if retry_count == 0:
+                            log(f"     [断点续传] 检测到已有进度 {format_size(downloaded_bytes)}，从断点处继续...")
                         else:
-                            total_size = task.total_bytes
+                            log(f"     [自动重连] 正在从断点 {format_size(downloaded_bytes)} 继续重试 ({retry_count+1}/5)...")
 
-                    mode = "ab" if (resp.status_code == 206 and downloaded_bytes > 0) else "wb"
-                    if mode == "wb":
-                        downloaded_bytes = 0
+                try:
+                    with requests.get(try_url, headers=req_headers, proxies=proxies, stream=True, timeout=25, verify=False, allow_redirects=True) as resp:
+                        if resp.status_code == 416:
+                            total_size = downloaded_bytes
+                        elif resp.status_code not in (200, 206):
+                            last_error = f"HTTP {resp.status_code}"
+                            retry_count += 1
+                            time.sleep(1)
+                            continue
+                        else:
+                            content_length = resp.headers.get("content-length")
+                            if content_length:
+                                total_size = int(content_length) + (downloaded_bytes if resp.status_code == 206 else 0)
+                                task.total_bytes = total_size
+                            else:
+                                total_size = task.total_bytes
 
-                    start_time = time.time()
-                    last_update = start_time
-                    bytes_since = 0
+                        mode = "ab" if (resp.status_code == 206 and downloaded_bytes > 0) else "wb"
+                        if mode == "wb":
+                            downloaded_bytes = 0
 
-                    with open(temp_path, mode) as f:
-                        for chunk in resp.iter_content(chunk_size=chunk_size):
-                            if cancel_current_task or stop_queue_requested:
-                                task.error_msg = "用户取消"
-                                return False
-                            if chunk:
-                                f.write(chunk)
-                                downloaded_bytes += len(chunk)
-                                bytes_since += len(chunk)
+                        start_time = time.time()
+                        last_update = start_time
+                        bytes_since = 0
 
-                                now = time.time()
-                                if now - last_update >= 0.3:
-                                    dt = now - last_update
-                                    speed_bps = bytes_since / dt
-                                    speed_str = format_size(int(speed_bps)) + "/s"
+                        with open(temp_path, mode) as f:
+                            for chunk in resp.iter_content(chunk_size=chunk_size):
+                                if cancel_current_task or stop_queue_requested:
+                                    task.error_msg = "用户取消"
+                                    return False
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded_bytes += len(chunk)
+                                    bytes_since += len(chunk)
 
-                                    if total_size and total_size > 0:
-                                        pct = min(100.0, (downloaded_bytes / total_size) * 100.0)
-                                        rem_bytes = max(0, total_size - downloaded_bytes)
-                                        eta_sec = int(rem_bytes / speed_bps) if speed_bps > 0 else 0
-                                        eta_str = f"{eta_sec // 60}分{eta_sec % 60}秒" if eta_sec > 60 else f"{eta_sec}秒"
+                                    now = time.time()
+                                    if now - last_update >= 0.3:
+                                        dt = now - last_update
+                                        speed_bps = bytes_since / dt if dt > 0 else 0
+                                        speed_str = format_size(int(speed_bps)) + "/s"
 
-                                        task.progress = pct
-                                        task.speed_str = speed_str
-                                        task.eta_str = eta_str
+                                        if total_size and total_size > 0:
+                                            pct = min(100.0, (downloaded_bytes / total_size) * 100.0)
+                                            rem_bytes = max(0, total_size - downloaded_bytes)
+                                            eta_sec = int(rem_bytes / speed_bps) if speed_bps > 0 else 0
+                                            eta_str = f"{eta_sec // 60}分{eta_sec % 60}秒" if eta_sec > 60 else f"{eta_sec}秒"
 
-                                        pb_global.value = pct / 100.0
-                                        lbl_global_pct.value = f"进度: {pct:.1f}% ({format_size(downloaded_bytes)} / {format_size(total_size)})"
-                                        lbl_global_speed.value = f"速度: {speed_str} | 预估剩余: {eta_str}"
-                                        page.update()
+                                            task.progress = pct
+                                            task.speed_str = speed_str
+                                            task.eta_str = eta_str
 
-                                    last_update = now
-                                    bytes_since = 0
+                                            pb_global.value = pct / 100.0
+                                            lbl_global_pct.value = f"进度: {pct:.1f}% ({format_size(downloaded_bytes)} / {format_size(total_size)})"
+                                            lbl_global_speed.value = f"速度: {speed_str} | 预估剩余: {eta_str}"
+                                            page.update()
 
-                if os.path.exists(local_path):
-                    os.remove(local_path)
-                os.rename(temp_path, local_path)
-                return True
+                                        last_update = now
+                                        bytes_since = 0
 
-            except Exception as e:
-                last_error = str(e)
-                continue
+                        # STRICT COMPLETENESS VALIDATION:
+                        if total_size and total_size > 0 and downloaded_bytes < total_size:
+                            log(f"     [!] 网络流中途断开 ({format_size(downloaded_bytes)} / {format_size(total_size)})，准备自动断点续传...")
+                            retry_count += 1
+                            time.sleep(1)
+                            continue
+
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                    os.rename(temp_path, local_path)
+                    return True
+
+                except Exception as e:
+                    last_error = str(e)
+                    retry_count += 1
+                    time.sleep(1)
+                    continue
 
         task.error_msg = str(last_error)
         return False
