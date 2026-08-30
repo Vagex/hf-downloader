@@ -5175,29 +5175,32 @@ class HFDownloaderApp(tk.Tk):
             v_url = v["url"]
             v_name = v["filename"]
 
+            plat_type = data.get("platform", "universal")
+            plat_label = data.get("platform_label") or f"[{plat_type.capitalize()}]"
+
             # Check if task already exists
-            exists = any(t.platform == "twitter" and t.direct_url == v_url and t.dest_dir == dest_dir for t in self.tasks)
+            exists = any(t.direct_url == v_url and t.dest_dir == dest_dir for t in self.tasks)
             if exists:
                 continue
 
             task_id = self._get_next_task_id()
             task = QueueTask(
                 task_id=task_id,
-                repo_id=f"🐦 {data.get('author_id') or 'Twitter'}",
-                repo_type="twitter",
-                branch=data.get("tweet_id", ""),
+                repo_id=f"{plat_label} {data.get('author_id') or data.get('author') or ''}".strip(),
+                repo_type=plat_type,
+                branch=str(data.get("tweet_id") or data.get("media_id") or ""),
                 file_path=v_name,
                 size_str=v["size_str"],
                 date_str=data.get("date", datetime.now().strftime("%Y-%m-%d %H:%M")),
                 dest_dir=dest_dir,
                 flatten=True,
-                endpoint="https://twitter.com",
+                endpoint="https://twitter.com" if plat_type == "twitter" else "",
                 token=None,
                 proxy=proxy,
                 status="等待中",
                 progress=0.0,
                 total_bytes=v["raw_size"] if v["raw_size"] > 0 else None,
-                platform="twitter",
+                platform=plat_type,
                 direct_url=v_url,
                 source_url=v.get("source_url"),
                 format_id=v.get("format_id")
@@ -5210,8 +5213,9 @@ class HFDownloaderApp(tk.Tk):
             self._save_tasks()
             self.rescan_all_tasks(silent=True)
             self._refresh_queue_tree()
-            self.log(f"[✓] 已将 {added_cnt} 项 Twitter 视频任务成功加入统一下载队列！")
-            messagebox.showinfo("入队成功", f"成功将 {added_cnt} 项 Twitter 视频任务加入统一下载队列！\n目标目录: {dest_dir}", parent=self)
+            p_lbl = data.get("platform_label") or "视频"
+            self.log(f"[✓] 已将 {added_cnt} 项【{p_lbl}】任务成功加入统一下载队列！")
+            messagebox.showinfo("入队成功", f"成功将 {added_cnt} 项【{p_lbl}】任务加入统一下载队列！\n目标目录: {dest_dir}", parent=self)
             if jump:
                 self.notebook.select(3)
         else:
