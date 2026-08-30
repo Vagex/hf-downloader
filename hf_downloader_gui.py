@@ -2303,12 +2303,265 @@ class DeleteConfirmDialog(tk.Toplevel):
 
 import re
 
+# ------------------ High-Performance Magnet & BitTorrent Engine ------------------
+DEFAULT_PUBLIC_TRACKERS = [
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://9.rarbg.to:2920/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://tracker.moeking.me:6969/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://exodus.desync.com:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://ipv4.tracker.harry.lu:80/announce",
+    "http://tracker.openbittorrent.com:80/announce",
+    "udp://tracker.bittor.pw:1337/announce"
+]
+
+class MagnetResolver:
+    """Intelligent Magnet link parser and active public trackers enhancer."""
+
+    @staticmethod
+    def is_magnet_link(url: str) -> bool:
+        if not url:
+            return False
+        s = url.strip().lower()
+        return s.startswith("magnet:?") or "xt=urn:btih:" in s
+
+    @classmethod
+    def parse_magnet(cls, raw_magnet: str) -> Dict[str, Any]:
+        import urllib.parse
+        raw_magnet = raw_magnet.strip()
+        parsed = urllib.parse.urlparse(raw_magnet)
+        query_params = urllib.parse.parse_qs(parsed.query)
+
+        xt_list = query_params.get("xt", [])
+        info_hash = ""
+        for xt in xt_list:
+            if xt.lower().startswith("urn:btih:"):
+                info_hash = xt[9:].strip().upper()
+                break
+
+        if not info_hash:
+            m = re.search(r'urn:btih:([a-zA-Z0-9]{32,40})', raw_magnet, re.IGNORECASE)
+            if m:
+                info_hash = m.group(1).upper()
+
+        if not info_hash:
+            raise ValueError("无法从磁力链接中提取到有效的特征码 (InfoHash)！")
+
+        dn_list = query_params.get("dn", [])
+        display_name = dn_list[0] if dn_list else f"Magnet_{info_hash[:12]}"
+        display_name = urllib.parse.unquote_plus(display_name)
+
+        existing_tr = query_params.get("tr", [])
+        all_trackers = list(dict.fromkeys(existing_tr + DEFAULT_PUBLIC_TRACKERS))
+
+        enhanced_params = [
+            ("xt", f"urn:btih:{info_hash}"),
+            ("dn", display_name)
+        ]
+        for tr in all_trackers:
+            enhanced_params.append(("tr", tr))
+        
+        enhanced_magnet = "magnet:?" + urllib.parse.urlencode(enhanced_params, doseq=True)
+
+        return {
+            "info_hash": info_hash,
+            "name": display_name,
+            "trackers": all_trackers,
+            "tracker_count": len(all_trackers),
+            "enhanced_magnet": enhanced_magnet,
+            "raw_magnet": raw_magnet
+        }
+
+
+class Aria2Manager:
+    """Portable Aria2 engine manager for multi-thread high-speed BT/Magnet downloading."""
+
+    _cached_exe = None
+
+    @classmethod
+    def find_executable(cls) -> Optional[str]:
+        if cls._cached_exe and os.path.exists(cls._cached_exe):
+            return cls._cached_exe
+
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "aria2c.exe"),
+            os.path.join(os.path.dirname(__file__), "bin", "aria2c.exe"),
+            os.path.join(os.path.dirname(__file__), "tools", "aria2c.exe"),
+            os.path.join(os.path.expanduser("~"), ".hf_downloader", "bin", "aria2c.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "aria2", "aria2c.exe"),
+            os.path.join(os.environ.get("ProgramFiles", ""), "aria2", "aria2c.exe"),
+        ]
+        which_path = shutil.which("aria2c")
+        if which_path:
+            candidates.insert(0, which_path)
+
+        for p in candidates:
+            if p and os.path.exists(p) and os.path.isfile(p):
+                cls._cached_exe = p
+                return p
+        return None
+
+    @classmethod
+    def ensure_executable(cls, log_callback=None) -> str:
+        exe = cls.find_executable()
+        if exe:
+            return exe
+
+        # Auto-download portable static aria2c.exe for Windows
+        dest_dir = os.path.join(os.path.expanduser("~"), ".hf_downloader", "bin")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_exe = os.path.join(dest_dir, "aria2c.exe")
+
+        if os.path.exists(dest_exe) and os.path.getsize(dest_exe) > 1024 * 1024:
+            cls._cached_exe = dest_exe
+            return dest_exe
+
+        if log_callback:
+            log_callback("⏳ 首次使用磁力下载，正在自动准备高速绿色版 Aria2 引擎...")
+
+        # Official static win64 release with multiple accelerator mirrors
+        download_urls = [
+            "https://ghfast.top/https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
+            "https://mirror.ghproxy.com/https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
+            "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+        ]
+        
+        import zipfile
+        temp_zip = os.path.join(dest_dir, "aria2_temp.zip")
+        for u in download_urls:
+            try:
+                r = requests.get(u, stream=True, timeout=20)
+                if r.status_code == 200:
+                    with open(temp_zip, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=64*1024):
+                            if chunk:
+                                f.write(chunk)
+                    
+                    with zipfile.ZipFile(temp_zip, 'r') as z:
+                        for item in z.namelist():
+                            if item.endswith("aria2c.exe"):
+                                with z.open(item) as src, open(dest_exe, "wb") as dst:
+                                    dst.write(src.read())
+                                break
+                    
+                    if os.path.exists(temp_zip):
+                        os.remove(temp_zip)
+                    if os.path.exists(dest_exe):
+                        if log_callback:
+                            log_callback("✓ 高速绿色版 Aria2 引擎已就绪！")
+                        cls._cached_exe = dest_exe
+                        return dest_exe
+            except Exception as e:
+                continue
+
+        if os.path.exists(temp_zip):
+            try: os.remove(temp_zip)
+            except Exception: pass
+
+        raise RuntimeError("未能自动下载 Aria2 引擎，请确认网络连接或手动安装 aria2c！")
+
+    @classmethod
+    def download_magnet(cls, enhanced_magnet: str, dest_dir: str, filename_hint: str,
+                        proxy: Optional[str] = None, task: Optional[Any] = None,
+                        update_ui_callback=None, cancel_checker=None, log_callback=None) -> bool:
+        exe = cls.ensure_executable(log_callback=log_callback)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        cmd = [
+            exe,
+            enhanced_magnet,
+            f"--dir={dest_dir}",
+            "--enable-dht=true",
+            "--dht-listen-port=6881-6999",
+            "--enable-peer-exchange=true",
+            "--bt-enable-lpd=true",
+            "--bt-max-peers=120",
+            "--bt-request-peer-speed-limit=100M",
+            "--max-connection-per-server=16",
+            "--seed-time=0",
+            "--summary-interval=1",
+            "--file-allocation=none",
+            "--console-log-level=notice"
+        ]
+        if proxy:
+            cmd.append(f"--all-proxy={proxy}")
+
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            creationflags=creationflags
+        )
+
+        prog_pattern = re.compile(
+            r'\[#\w+\s+([\d\.]+\w+)/([\d\.]+\w+)\s*(?:\((\d+(?:\.\d+)?)%\))?\s+CN:(\d+)(?:\s+SD:(\d+))?\s+DL:([\d\.]+\w+(?:/s)?)(?:\s+ETA:(\w+))?\]'
+        )
+
+        last_update = 0.0
+        success = False
+
+        try:
+            for line in proc.stdout:
+                if cancel_checker and cancel_checker():
+                    proc.terminate()
+                    break
+
+                line_s = line.strip()
+                if not line_s:
+                    continue
+
+                if "Download complete" in line_s or "download completed" in line_s.lower():
+                    success = True
+
+                m = prog_pattern.search(line_s)
+                if m:
+                    cur_sz, tot_sz, pct, cn, sd, dl, eta = m.groups()
+                    now = time.time()
+                    if now - last_update >= 0.3:
+                        last_update = now
+                        pct_val = float(pct) if pct else 0.0
+                        speed_str = dl if "/s" in dl else f"{dl}/s"
+                        peer_info = f"连接: {cn} | 种子: {sd or 0}"
+                        eta_str = eta or "--"
+                        if task:
+                            task.progress = pct_val
+                            task.speed_str = speed_str
+                            task.eta_str = eta_str
+                        if update_ui_callback:
+                            update_ui_callback(pct_val, cur_sz, tot_sz, speed_str, eta_str, peer_info)
+
+            proc.wait(timeout=5)
+            if proc.returncode == 0:
+                success = True
+        except Exception as e:
+            try: proc.kill()
+            except Exception: pass
+            if task:
+                task.error_msg = str(e)
+            return False
+
+        if success and task:
+            task.progress = 100.0
+        return success
+
+
 class UniversalMediaResolver:
     """High-reliability multi-platform universal media parser for Bilibili, WeChat, Twitter/X, and 1000+ sites."""
 
     @staticmethod
     def detect_platform(raw_input: str) -> str:
         s = raw_input.strip().lower()
+        if MagnetResolver.is_magnet_link(raw_input):
+            return "magnet"
         if "bilibili.com" in s or "b23.tv" in s or re.search(r'\b(bv[a-za-z0-9]{10}|av\d+)\b', s):
             return "bilibili"
         if "mp.weixin.qq.com" in s:
@@ -2369,7 +2622,9 @@ class UniversalMediaResolver:
         raw_input = raw_input.strip()
         platform = cls.detect_platform(raw_input)
 
-        if platform == "bilibili":
+        if platform == "magnet":
+            return cls._resolve_magnet(raw_input, proxy)
+        elif platform == "bilibili":
             return cls._resolve_bilibili(raw_input, proxy)
         elif platform == "wechat_article":
             return cls._resolve_wechat_article(raw_input, proxy)
@@ -2379,6 +2634,47 @@ class UniversalMediaResolver:
             return cls._resolve_twitter(raw_input, proxy)
         else:
             return cls._resolve_universal(raw_input, proxy)
+
+    # ---------------- Magnet / BitTorrent Resolver ----------------
+    @classmethod
+    def _resolve_magnet(cls, raw_input: str, proxy: Optional[str]) -> Dict[str, Any]:
+        info = MagnetResolver.parse_magnet(raw_input)
+        info_hash = info["info_hash"]
+        display_name = info["name"]
+        enhanced_magnet = info["enhanced_magnet"]
+        tr_cnt = info["tracker_count"]
+
+        clean_fn = cls.sanitize_filename(f"[磁力]_{display_name}", max_len=60)
+        # Preserve common extension if already present
+        if not re.search(r'\.[a-zA-Z0-9]{2,5}$', clean_fn):
+            clean_fn += ".mp4"
+
+        variants_list = [{
+            "quality": "🧲 P2P 完整资源包 (BT/磁力链接)",
+            "height": 1080,
+            "bitrate": 0,
+            "bitrate_str": f"{tr_cnt} 个加速节点",
+            "size_str": "P2P 动态流",
+            "raw_size": 0,
+            "url": enhanced_magnet,
+            "filename": clean_fn,
+            "http_headers": {},
+            "source_url": enhanced_magnet,
+            "format_id": "magnet"
+        }]
+
+        return {
+            "platform": "magnet",
+            "platform_label": "🧲 磁力链接 (BitTorrent)",
+            "media_id": info_hash,
+            "author": f"InfoHash: {info_hash[:16]}...",
+            "author_id": f"Trackers: {tr_cnt}个",
+            "text": display_name,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "duration": "P2P 资源",
+            "thumbnail": None,
+            "variants": variants_list
+        }
 
     # ---------------- Bilibili Resolver (Official View/PlayURL API + yt-dlp) ----------------
     @classmethod
@@ -6448,6 +6744,29 @@ class HFDownloaderApp(tk.Tk):
                 text=f"正在下载 [#{t.task_id}]: {os.path.basename(t.file_path)}", foreground="blue"
             ))
 
+            # Check if this task is a Magnet / BitTorrent task
+            if current_task.platform == "magnet" or (current_task.direct_url and current_task.direct_url.startswith("magnet:?")):
+                self.log(f"     [磁力下载] 启用 Aria2 高性能 P2P/DHT 极速下载引擎...")
+                magnet_link = current_task.direct_url or current_task.file_path
+                def _update_mag_ui(pct, cur_sz, tot_sz, spd, eta, peer_str):
+                    task_text = f"进度: {pct:.1f}% ({cur_sz} / {tot_sz})"
+                    spd_text = f"速度: {spd} | {peer_str} | 预估: {eta}"
+                    self.after(0, lambda p=pct, t_txt=task_text, s_txt=spd_text: (
+                        self.progress_var.set(p),
+                        self.lbl_progress_text.config(text=t_txt),
+                        self.lbl_speed_text.config(text=s_txt)
+                    ))
+                
+                success = Aria2Manager.download_magnet(
+                    enhanced_magnet=magnet_link,
+                    dest_dir=current_task.dest_dir,
+                    filename_hint=current_task.file_path,
+                    proxy=proxy_str,
+                    task=current_task,
+                    update_ui_callback=_update_mag_ui,
+                    cancel_checker=lambda: self.cancel_current_task or self.stop_queue_requested,
+                    log_callback=self.log
+                )
             # Check if this task requires yt-dlp native extraction & muxing engine (e.g. YouTube googlevideo streams, DASH video+audio muxing)
             is_ytdlp_stream = bool(
                 getattr(current_task, "source_url", None) or 
