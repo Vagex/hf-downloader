@@ -472,10 +472,15 @@ class Aria2Manager:
 
 
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
+# ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 class QuarkPanResolver:
     """Intelligent Quark Cloud Drive (pan.quark.cn) share parser and direct download link generator."""
 
-    BASE_URL = "https://drive-pc.quark.cn/1/clouddrive"
+    BASE_URLS = [
+        "https://drive.quark.cn/1/clouddrive",
+        "https://pan.quark.cn/1/clouddrive",
+        "https://drive-pc.quark.cn/1/clouddrive"
+    ]
 
     @staticmethod
     def is_quark_link(url: str) -> bool:
@@ -506,49 +511,78 @@ class QuarkPanResolver:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 QuarkPC/2.5.0",
             "Referer": f"https://pan.quark.cn/s/{pwd_id}",
             "Origin": "https://pan.quark.cn",
-            "Content-Type": "application/json;charset=UTF-8"
+            "Content-Type": "application/json;charset=UTF-8",
+            "Accept": "application/json, text/plain, */*"
         }
         if cookie:
             headers["Cookie"] = cookie
 
-        # Step 1: Get share_token
-        token_url = f"{cls.BASE_URL}/share/sharepage/token"
-        token_payload = {
-            "pwd_id": pwd_id,
-            "passcode": passcode
-        }
+        # Step 1: Request share_token with multi-endpoint failover and detailed error diagnostics
+        share_token = ""
+        last_err = ""
+        for base in cls.BASE_URLS:
+            try:
+                token_url = f"{base}/share/sharepage/token"
+                r_tok = requests.post(token_url, json={"pwd_id": pwd_id, "passcode": passcode}, headers=headers, proxies=proxies, timeout=10)
+                tok_data = r_tok.json()
+                code = tok_data.get("code")
+                msg = tok_data.get("message") or tok_data.get("msg") or ""
 
-        r_tok = requests.post(token_url, json=token_payload, headers=headers, proxies=proxies, timeout=12)
-        if r_tok.status_code != 200:
-            raise ValueError(f"访问夸克网盘接口失败 (HTTP {r_tok.status_code})，请检查网络或代理！")
+                if code == 0 or tok_data.get("status") == 200:
+                    share_token = tok_data.get("data", {}).get("share_token") or ""
+                    if share_token:
+                        break
+                elif code == 41006 or r_tok.status_code == 404:
+                    raise ValueError("夸克网盘提示: 该分享链接不存在或已被作者取消！")
+                elif code == 41007:
+                    raise ValueError("夸克网盘提示: 提取码错误，请在链接后附带 提取码:xxxx")
+                elif code == 41008:
+                    raise ValueError("夸克网盘提示: 该分享链接已过期！")
+                elif msg:
+                    last_err = msg
+            except ValueError:
+                raise
+            except Exception as e:
+                last_err = str(e)
+                continue
 
-        tok_data = r_tok.json()
-        if tok_data.get("code") != 0 and tok_data.get("status") != 200:
-            err_msg = tok_data.get("message") or tok_data.get("msg") or "提取分享 Token 失败"
-            raise ValueError(f"夸克网盘提示: {err_msg} (如需提取码请在链接后附带 提取码:xxxx)")
+        if not share_token:
+            err = last_err or "获取分享 Token 失败，可能是链接失效或需要提取码"
+            raise ValueError(f"夸克网盘提示: {err} (若需提取码请在链接后输入 提取码:xxxx)")
 
-        share_token = tok_data.get("data", {}).get("share_token") or ""
+        # Step 2: Request share file list detail
+        detail_json = None
+        for base in cls.BASE_URLS:
+            try:
+                detail_url = f"{base}/share/sharepage/detail"
+                params = {
+                    "pwd_id": pwd_id,
+                    "stoken": share_token,
+                    "pdir_fid": "0",
+                    "force": "0",
+                    "_page": "1",
+                    "_size": "50",
+                    "_fetch_total": "1",
+                    "_sort": "file_type:asc,updated_at:desc"
+                }
+                r_detail = requests.get(detail_url, params=params, headers=headers, proxies=proxies, timeout=10)
+                if r_detail.status_code == 200:
+                    dj = r_detail.json()
+                    if dj.get("code") == 0:
+                        detail_json = dj
+                        break
+            except Exception:
+                continue
 
-        # Step 2: Get share file list detail
-        detail_url = f"{cls.BASE_URL}/share/sharepage/detail"
-        params = {
-            "pwd_id": pwd_id,
-            "stoken": share_token,
-            "pdir_fid": "0",
-            "_fetch_total": "1"
-        }
+        if not detail_json:
+            raise ValueError("获取夸克分享文件列表失败，可能是由于网络连接波动或该分享受限，请稍后重试！")
 
-        r_detail = requests.get(detail_url, params=params, headers=headers, proxies=proxies, timeout=12)
-        if r_detail.status_code != 200:
-            raise ValueError(f"获取夸克分享文件详情失败 (HTTP {r_detail.status_code})！")
-
-        detail_json = r_detail.json()
         d_data = detail_json.get("data", {})
         share_title = d_data.get("title") or "夸克网盘分享资源"
         file_list = d_data.get("list", [])
 
         if not file_list:
-            raise ValueError("该夸克网盘分享中暂无文件或已被分享者取消！")
+            raise ValueError("该夸克网盘分享中暂无文件或已被分享者清空！")
 
         variants = []
         for f in file_list:
@@ -560,21 +594,24 @@ class QuarkPanResolver:
             sz_str = f"{fsize / (1024*1024):.2f} MB" if fsize >= 1024*1024 else (f"{fsize/1024:.1f} KB" if fsize else ("目录" if is_dir else "--"))
             clean_fn = re.sub(r'[\\/*?:"<>|\r\n\t]', '_', f"[夸克]_{fname}")
 
-            down_api_url = f"{cls.BASE_URL}/share/sharepage/download"
             down_url = ""
-            try:
-                r_dl = requests.post(down_api_url, json={
-                    "pwd_id": pwd_id,
-                    "stoken": share_token,
-                    "fids": [fid]
-                }, headers=headers, proxies=proxies, timeout=8)
-                if r_dl.status_code == 200:
-                    dl_json = r_dl.json()
-                    dl_data = dl_json.get("data", [])
-                    if dl_data and isinstance(dl_data, list):
-                        down_url = dl_data[0].get("download_url") or ""
-            except Exception:
-                pass
+            for base in cls.BASE_URLS:
+                try:
+                    down_api_url = f"{base}/share/sharepage/download"
+                    r_dl = requests.post(down_api_url, json={
+                        "pwd_id": pwd_id,
+                        "stoken": share_token,
+                        "fids": [fid]
+                    }, headers=headers, proxies=proxies, timeout=8)
+                    if r_dl.status_code == 200:
+                        dl_json = r_dl.json()
+                        dl_data = dl_json.get("data", [])
+                        if dl_data and isinstance(dl_data, list):
+                            down_url = dl_data[0].get("download_url") or ""
+                            if down_url:
+                                break
+                except Exception:
+                    continue
 
             target_download_url = down_url or f"https://pan.quark.cn/s/{pwd_id}#fid={fid}"
             ext_icon = "📁 " if is_dir else "📄 "
@@ -607,7 +644,6 @@ class QuarkPanResolver:
             "thumbnail": None,
             "variants": variants
         }
-
 
 class UniversalMediaResolver:
     """High-reliability multi-platform universal media parser for Bilibili, WeChat, Twitter/X, and 1000+ sites."""
