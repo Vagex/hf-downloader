@@ -474,6 +474,82 @@ class Aria2Manager:
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
+# ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Engine ------------------
+class QuarkPanEngine:
+    """Quark Cloud Drive authentication, cookie management, and direct download engine."""
+
+    COOKIE_FILE = os.path.join(os.path.expanduser("~"), ".hf_downloader", "quark_cookie.txt")
+
+    @classmethod
+    def get_cookie(cls) -> str:
+        if os.path.exists(cls.COOKIE_FILE):
+            try:
+                with open(cls.COOKIE_FILE, "r", encoding="utf-8") as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        return ""
+
+    @classmethod
+    def save_cookie(cls, cookie: str):
+        os.makedirs(os.path.dirname(cls.COOKIE_FILE), exist_ok=True)
+        with open(cls.COOKIE_FILE, "w", encoding="utf-8") as f:
+            f.write(cookie.strip())
+
+    @classmethod
+    def request_direct_download_url(cls, pwd_id: str, stoken: str, fid: str, cookie: str = "") -> str:
+        if not cookie:
+            cookie = cls.get_cookie()
+
+        if not cookie:
+            raise ValueError(
+                "夸克网盘官方要求必须登录账号才能生成下载直链！\n\n"
+                "💡 解决方式 (非常简单):\n"
+                "1. 在浏览器打开 pan.quark.cn 登录您的夸克账号 (免费账号即可)；\n"
+                "2. 按 F12 打开开发者工具，在【网络(Network)】中复制任意请求的 Cookie；\n"
+                "3. 点击软件中 Tab 3 的【🍪 夸克 Cookie】按钮粘贴保存即可高速下载！"
+            )
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 QuarkPC/2.5.0",
+            "Referer": f"https://pan.quark.cn/s/{pwd_id}",
+            "Origin": "https://pan.quark.cn",
+            "Content-Type": "application/json;charset=UTF-8",
+            "Cookie": cookie
+        }
+
+        # Step 1: Save file to user's drive root to unlock direct download URL
+        save_url = "https://drive.quark.cn/1/clouddrive/share/sharepage/save"
+        save_payload = {
+            "pwd_id": pwd_id,
+            "stoken": stoken,
+            "fid_list": [fid],
+            "fid_token_list": [],
+            "to_pdir_fid": "0"
+        }
+        try:
+            r_save = requests.post(save_url, json=save_payload, headers=headers, timeout=12)
+            save_json = r_save.json()
+            if save_json.get("code") != 0 and save_json.get("status") != 200:
+                msg = save_json.get("message") or "夸克转存授权失败"
+        except Exception:
+            pass
+
+        # Step 2: Request live direct download URL
+        dl_url = "https://drive.quark.cn/1/clouddrive/file/download"
+        r_dl = requests.post(dl_url, json={"fids": [fid]}, headers=headers, timeout=12)
+        dl_json = r_dl.json()
+        if dl_json.get("code") == 0:
+            data = dl_json.get("data", [])
+            if data and isinstance(data, list):
+                real_url = data[0].get("download_url") or ""
+                if real_url:
+                    return real_url
+
+        err_msg = dl_json.get("message") or "未能获取到夸克网盘的高速直链，请检查 Cookie 是否有效！"
+        raise ValueError(f"夸克网盘提示: {err_msg}")
+
+
 class QuarkPanResolver:
     """Intelligent Quark Cloud Drive (pan.quark.cn) share parser with recursive sub-folder expansion."""
 
@@ -2249,6 +2325,22 @@ def main(page: ft.Page):
             proxies = {"http": proxy_str, "https": proxy_str} if proxy_str else None
 
             log(f"[任务 #{current_task.task_id}] 开始下载: {os.path.basename(current_task.file_path)} (代理: {proxy_str or '直连'})")
+
+            # Check if this task is a Quark Cloud Drive task
+            if current_task.platform == "quark":
+                log(f"     [夸克下载] 正在生成高速下载直链: {current_task.file_path}...")
+                try:
+                    pwd_id, _ = QuarkPanResolver.extract_pwd_and_passcode(current_task.source_url or "")
+                    stoken = getattr(current_task, "stoken", "")
+                    fid = current_task.format_id or ""
+                    real_dl_url = QuarkPanEngine.request_direct_download_url(pwd_id=pwd_id, stoken=stoken, fid=fid)
+                    current_task.direct_url = real_dl_url
+                except Exception as e:
+                    log(f"     [!] 夸克直链获取受限: {e}")
+                    current_task.status = "失败"
+                    current_task.error_msg = str(e)
+                    current_download_task = None
+                    continue
 
             # Check if this task is a Magnet / BitTorrent task
             if current_task.platform == "magnet" or (current_task.direct_url and current_task.direct_url.startswith("magnet:?")):

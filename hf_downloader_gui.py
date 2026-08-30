@@ -2557,6 +2557,83 @@ class Aria2Manager:
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
+# ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Engine ------------------
+class QuarkPanEngine:
+    """Quark Cloud Drive authentication, cookie management, and direct download engine."""
+
+    COOKIE_FILE = os.path.join(os.path.expanduser("~"), ".hf_downloader", "quark_cookie.txt")
+
+    @classmethod
+    def get_cookie(cls) -> str:
+        if os.path.exists(cls.COOKIE_FILE):
+            try:
+                with open(cls.COOKIE_FILE, "r", encoding="utf-8") as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        return ""
+
+    @classmethod
+    def save_cookie(cls, cookie: str):
+        os.makedirs(os.path.dirname(cls.COOKIE_FILE), exist_ok=True)
+        with open(cls.COOKIE_FILE, "w", encoding="utf-8") as f:
+            f.write(cookie.strip())
+
+    @classmethod
+    def request_direct_download_url(cls, pwd_id: str, stoken: str, fid: str, cookie: str = "") -> str:
+        if not cookie:
+            cookie = cls.get_cookie()
+
+        if not cookie:
+            raise ValueError(
+                "夸克网盘官方要求必须登录账号才能生成下载直链！\n\n"
+                "💡 解决方式 (非常简单):\n"
+                "1. 在浏览器打开 pan.quark.cn 登录您的夸克账号 (免费账号即可)；\n"
+                "2. 按 F12 打开开发者工具，在【网络(Network)】中复制任意请求的 Cookie；\n"
+                "3. 点击软件中 Tab 3 的【🍪 夸克 Cookie】按钮粘贴保存即可高速下载！"
+            )
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 QuarkPC/2.5.0",
+            "Referer": f"https://pan.quark.cn/s/{pwd_id}",
+            "Origin": "https://pan.quark.cn",
+            "Content-Type": "application/json;charset=UTF-8",
+            "Cookie": cookie
+        }
+
+        # Step 1: Save file to user's drive root to unlock direct download URL
+        save_url = "https://drive.quark.cn/1/clouddrive/share/sharepage/save"
+        save_payload = {
+            "pwd_id": pwd_id,
+            "stoken": stoken,
+            "fid_list": [fid],
+            "fid_token_list": [],
+            "to_pdir_fid": "0"
+        }
+        try:
+            r_save = requests.post(save_url, json=save_payload, headers=headers, timeout=12)
+            save_json = r_save.json()
+            if save_json.get("code") != 0 and save_json.get("status") != 200:
+                msg = save_json.get("message") or "夸克转存授权失败"
+                # If error is not fatal, try direct download below
+        except Exception:
+            pass
+
+        # Step 2: Request live direct download URL
+        dl_url = "https://drive.quark.cn/1/clouddrive/file/download"
+        r_dl = requests.post(dl_url, json={"fids": [fid]}, headers=headers, timeout=12)
+        dl_json = r_dl.json()
+        if dl_json.get("code") == 0:
+            data = dl_json.get("data", [])
+            if data and isinstance(data, list):
+                real_url = data[0].get("download_url") or ""
+                if real_url:
+                    return real_url
+
+        err_msg = dl_json.get("message") or "未能获取到夸克网盘的高速直链，请检查 Cookie 是否有效！"
+        raise ValueError(f"夸克网盘提示: {err_msg}")
+
+
 class QuarkPanResolver:
     """Intelligent Quark Cloud Drive (pan.quark.cn) share parser with recursive sub-folder expansion."""
 
@@ -4860,6 +4937,61 @@ class HFDownloaderApp(tk.Tk):
         self.notebook.select(3)
 
     # ------------------ Tab 3: Universal Media Video Downloader UI & Handlers ------------------
+    def open_quark_cookie_dialog(self):
+        """Open a modern dialog for configuring Quark Cloud Drive Cookie."""
+        dlg = tk.Toplevel(self)
+        dlg.title("🍪 夸克网盘账号 Cookie 配置")
+        dlg.geometry("580x360")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        pad_f = ttk.Frame(dlg, padding="12")
+        pad_f.pack(fill=tk.BOTH, expand=True)
+
+        lbl_title = ttk.Label(pad_f, text="🍪 夸克网盘 Cookie 配置 (解锁 100MB+ 大文件与满速下载)", font=FONT_BOLD, foreground="#0d6efd")
+        lbl_title.pack(anchor=tk.W, pady=(0, 6))
+
+        lbl_tips = ttk.Label(pad_f, text=(
+            "💡 为什么需要 Cookie？\n"
+            "夸克网盘官方策略要求：必须登录账号才能生成大文件与 4K 视频的高速下载直链。\n\n"
+            "📖 简明获取步骤 (免费账号即可):\n"
+            "1. 电脑浏览器打开 pan.quark.cn 并登录您的夸克账号；\n"
+            "2. 按键盘 F12 打开【开发者工具】，点击【网络 (Network)】标签；\n"
+            "3. 刷新一下页面，点击任意请求，在标头中复制完整的 Cookie 内容；\n"
+            "4. 粘贴至下方输入框并点击【💾 保存 Cookie】即可！"
+        ), font=FONT_SMALL, foreground="#555555", justify=tk.LEFT)
+        lbl_tips.pack(anchor=tk.W, pady=(0, 8))
+
+        txt_cookie = tk.Text(pad_f, height=5, font=FONT_SMALL, wrap=tk.CHAR)
+        txt_cookie.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        current_cookie = QuarkPanEngine.get_cookie()
+        if current_cookie:
+            txt_cookie.insert("1.0", current_cookie)
+
+        btn_box = ttk.Frame(pad_f)
+        btn_box.pack(fill=tk.X)
+
+        def _save():
+            ck = txt_cookie.get("1.0", tk.END).strip()
+            QuarkPanEngine.save_cookie(ck)
+            messagebox.showinfo("保存成功", "夸克网盘 Cookie 已成功保存！现在可以高速下载夸克网盘的大文件与视频了。", parent=dlg)
+            dlg.destroy()
+
+        def _clear():
+            QuarkPanEngine.save_cookie("")
+            txt_cookie.delete("1.0", tk.END)
+            messagebox.showinfo("已清除", "已清除保存的夸克网盘 Cookie。", parent=dlg)
+
+        btn_save = tk.Button(btn_box, text="💾 保存 Cookie", bg="#198754", fg="#ffffff", font=FONT_BOLD, padx=12, pady=4, command=_save)
+        btn_save.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_clear = ttk.Button(btn_box, text="🗑️ 清除", command=_clear)
+        btn_clear.pack(side=tk.LEFT, padx=4)
+
+        btn_close = ttk.Button(btn_box, text="关闭", command=dlg.destroy)
+        btn_close.pack(side=tk.RIGHT)
+
     def _build_tab_twitter(self):
         self.tw_paned_v = ttk.PanedWindow(self.tab_twitter, orient=tk.VERTICAL)
         self.tw_paned_v.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
@@ -4893,6 +5025,10 @@ class HFDownloaderApp(tk.Tk):
 
         btn_tw_hist = ttk.Button(tw_config_frame, text=" 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("twitter"))
         btn_tw_hist.grid(row=0, column=3, padx=4, pady=3)
+
+        btn_quark_ck = ttk.Button(tw_config_frame, text=" 🍪 夸克Cookie...", image=self.icons["shield"], compound=tk.LEFT, command=self.open_quark_cookie_dialog)
+        btn_quark_ck.grid(row=0, column=4, padx=4, pady=3)
+        ToolTip(btn_quark_ck, "配置夸克网盘 Cookie (免费账号即可)，解锁大文件与 4K 视频高速直链下载")
 
         ToolTip(self.tw_url_combo, "输入 Twitter/X 推文、B站视频链接 (BV/AV/b23.tv)、微信公众号文章链接、微信视频号或 YouTube/TikTok 等全网 1000+ 视频链接")
 
@@ -6931,6 +7067,25 @@ class HFDownloaderApp(tk.Tk):
             self.after(0, lambda t=current_task: self.lbl_status.config(
                 text=f"正在下载 [#{t.task_id}]: {os.path.basename(t.file_path)}", foreground="blue"
             ))
+
+            # Check if this task is a Quark Cloud Drive task
+            if current_task.platform == "quark":
+                self.log(f"     [夸克下载] 正在生成高速下载直链: {current_task.file_path}...")
+                try:
+                    pwd_id, _ = QuarkPanResolver.extract_pwd_and_passcode(current_task.source_url or "")
+                    stoken = getattr(current_task, "stoken", "")
+                    fid = current_task.format_id or ""
+                    real_dl_url = QuarkPanEngine.request_direct_download_url(pwd_id=pwd_id, stoken=stoken, fid=fid)
+                    current_task.direct_url = real_dl_url
+                except Exception as e:
+                    self.log(f"     [!] 夸克直链获取受限: {e}")
+                    current_task.status = "失败"
+                    current_task.error_msg = str(e)
+                    self.after(0, lambda err=str(e): messagebox.showwarning("夸克下载提示", f"{err}\n\n请在 Tab 3 点击【🍪 夸克Cookie...】配置您的夸克登录凭证。", parent=self))
+                    self._update_task_row(current_task)
+                    self._save_tasks()
+                    self.current_download_task = None
+                    continue
 
             # Check if this task is a Magnet / BitTorrent task
             if current_task.platform == "magnet" or (current_task.direct_url and current_task.direct_url.startswith("magnet:?")):
