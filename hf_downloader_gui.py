@@ -2304,7 +2304,7 @@ class DeleteConfirmDialog(tk.Toplevel):
 import re
 
 # ------------------ High-Performance Magnet & BitTorrent Engine ------------------
-DEFAULT_PUBLIC_TRACKERS = [
+TOP_GLOBAL_TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://open.tracker.cl:1337/announce",
     "udp://opentracker.i2p.rocks:6969/announce",
@@ -2324,7 +2324,11 @@ DEFAULT_PUBLIC_TRACKERS = [
     "udp://p4p.arenabg.com:1337/announce",
     "udp://movies.zsw.ca:6969/announce",
     "udp://retracker.lanta.me:2710/announce",
-    "udp://tracker.cyberia.is:6969/announce"
+    "udp://tracker.cyberia.is:6969/announce",
+    "udp://tracker.bitsearch.to:1337/announce",
+    "udp://tracker.0x.tf:6969/announce",
+    "http://tracker.ren/announce",
+    "udp://tracker.dump.cl:6969/announce"
 ]
 
 class MagnetResolver:
@@ -2364,7 +2368,7 @@ class MagnetResolver:
         display_name = urllib.parse.unquote_plus(display_name)
 
         existing_tr = query_params.get("tr", [])
-        all_trackers = list(dict.fromkeys(existing_tr + DEFAULT_PUBLIC_TRACKERS))
+        all_trackers = list(dict.fromkeys(existing_tr + TOP_GLOBAL_TRACKERS))
 
         enhanced_magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(display_name)}"
         for tr in all_trackers:
@@ -2466,24 +2470,68 @@ class Aria2Manager:
         raise RuntimeError("未能自动下载 Aria2 引擎，请确认网络连接或手动安装 aria2c！")
 
     @classmethod
+    def try_fetch_torrent_cache(cls, info_hash: str, log_callback=None) -> Optional[str]:
+        """Fetch cached .torrent file from global public caches to skip slow DHT metadata stage."""
+        if not info_hash:
+            return None
+        info_hash = info_hash.upper()
+        cache_dir = os.path.join(os.path.expanduser("~"), ".hf_downloader", "torrents")
+        os.makedirs(cache_dir, exist_ok=True)
+        local_torrent = os.path.join(cache_dir, f"{info_hash}.torrent")
+        if os.path.exists(local_torrent) and os.path.getsize(local_torrent) > 200:
+            return local_torrent
+
+        mirrors = [
+            f"https://itorrents.org/torrent/{info_hash}.torrent",
+            f"https://torrage.info/torrent.php?h={info_hash}",
+            f"http://btcache.me/torrent/{info_hash}"
+        ]
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}
+        
+        for u in mirrors:
+            try:
+                r = requests.get(u, headers=headers, timeout=5)
+                if r.status_code == 200 and len(r.content) > 200:
+                    with open(local_torrent, "wb") as f:
+                        f.write(r.content)
+                    if log_callback:
+                        log_callback("⚡ [秒开加速] 成功从全球种子缓存池预取到 .torrent 元数据文件，跳过 DHT 寻道阶段！")
+                    return local_torrent
+            except Exception:
+                continue
+        return None
+
+    @classmethod
     def download_magnet(cls, enhanced_magnet: str, dest_dir: str, filename_hint: str,
                         proxy: Optional[str] = None, task: Optional[Any] = None,
                         update_ui_callback=None, cancel_checker=None, log_callback=None) -> bool:
         exe = cls.ensure_executable(log_callback=log_callback)
         os.makedirs(dest_dir, exist_ok=True)
 
-        tracker_arg = f"--bt-tracker={','.join(DEFAULT_PUBLIC_TRACKERS)}"
+        # Extract InfoHash
+        info_hash = ""
+        m_hash = re.search(r'urn:btih:([a-zA-Z0-9]{32,40})', enhanced_magnet, re.IGNORECASE)
+        if m_hash:
+            info_hash = m_hash.group(1).upper()
+
+        # Try to boost with direct .torrent file
+        local_torrent = cls.try_fetch_torrent_cache(info_hash, log_callback=log_callback)
+        target_source = local_torrent if local_torrent else enhanced_magnet
+
+        tracker_arg = f"--bt-tracker={','.join(TOP_GLOBAL_TRACKERS)}"
         cmd = [
             exe,
-            enhanced_magnet,
+            target_source,
             tracker_arg,
             f"--dir={dest_dir}",
             "--dht-entry-point=router.bittorrent.com:6881",
             "--dht-entry-point=dht.transmissionbt.com:6881",
             "--dht-entry-point=router.utorrent.com:6881",
             "--enable-dht=true",
-            "--enable-dht6=false",
+            "--enable-dht6=true",
             "--dht-listen-port=6881-6999",
+            "--peer-id-prefix=-qB4600-",
+            "--user-agent=qBittorrent/4.6.0",
             "--enable-peer-exchange=true",
             "--bt-enable-lpd=true",
             "--bt-max-peers=150",
@@ -2498,7 +2546,7 @@ class Aria2Manager:
             cmd.append(f"--all-proxy={proxy}")
 
         if log_callback:
-            log_callback(f"[*] 启动 P2P/DHT 寻道网络，已注入 {len(DEFAULT_PUBLIC_TRACKERS)} 个顶级公共 Trackers 节点...")
+            log_callback(f"[*] 启动 P2P/DHT 极速加速网络，已注入 {len(TOP_GLOBAL_TRACKERS)} 个顶级公共 Trackers 节点...")
 
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         proc = subprocess.Popen(
@@ -2518,6 +2566,7 @@ class Aria2Manager:
 
         last_update = 0.0
         last_log_t = time.time()
+        start_t = time.time()
         success = False
 
         try:
@@ -2541,18 +2590,22 @@ class Aria2Manager:
                     now = time.time()
                     pct_val = float(pct) if pct else 0.0
                     speed_str = dl if "/s" in dl else f"{dl}/s"
-                    peer_info = f"节点: {cn} | 种子: {sd or 0}"
+                    sd_val = int(sd) if (sd and sd.isdigit()) else 0
+                    peer_info = f"节点: {cn} | 做种者: {sd_val}"
                     eta_str = eta or "--"
 
                     # Output periodic live handshake log every 3 seconds
                     if now - last_log_t >= 3.0:
                         last_log_t = now
-                        if pct_val > 0.0:
+                        if pct_val > 0.0 or speed_str not in ("0B/s", "0B"):
                             if log_callback:
                                 log_callback(f"     [P2P传输中] 进度: {pct_val:.1f}% ({cur_sz}/{tot_sz}) | 速度: {speed_str} | {peer_info} | 预估: {eta_str}")
                         else:
                             if log_callback:
-                                log_callback(f"     [🧲 P2P寻道] 正在与 {cn} 个活跃节点建立连接，交换种子元数据并准备高速下载...")
+                                if sd_val == 0 and (now - start_t > 30):
+                                    log_callback(f"     [🧲 P2P寻道] 已连 {cn} 个节点 (当前做种者较少，正在全网 DHT 寻找活跃做种者中...)")
+                                else:
+                                    log_callback(f"     [🧲 P2P寻道] 正在与 {cn} 个活跃节点建立连接，交换种子元数据并准备高速下载...")
 
                     if now - last_update >= 0.3:
                         last_update = now
