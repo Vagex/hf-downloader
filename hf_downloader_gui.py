@@ -1205,18 +1205,21 @@ class PresetDirectoryManagerDialog(tk.Toplevel):
 # ------------------ Universal Built-in Video Player Engine ------------------
 import shutil
 import subprocess
+import tempfile
+import hashlib
 
 class BuiltinTkinterPlayerDialog(tk.Toplevel):
-    """Pure Python embedded video player window using OpenCV & Tkinter Canvas for full format decoding."""
+    """Pure Python embedded video player window using OpenCV & Tkinter Canvas with smart live buffering."""
 
-    def __init__(self, parent, video_source: str, title_text: str = "内置视频播放器", http_headers: Optional[Dict[str, str]] = None):
+    def __init__(self, parent, video_source: str, title_text: str = "内置视频播放器", http_headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None):
         super().__init__(parent)
         self.video_source = video_source
         self.title_text = title_text
         self.http_headers = http_headers or {}
+        self.proxy = proxy
         
         self.title(f"🎬 内置视频播放器 - {title_text}")
-        self.geometry("820x600")
+        self.geometry("840x620")
         self.minsize(640, 480)
         self.configure(bg="#0f172a")
         self.transient(parent)
@@ -1227,6 +1230,8 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
         self.fps = 30.0
         self.current_frame_idx = 0
         self.is_slider_dragging = False
+        self.temp_buffer_file = None
+        self.is_buffering_active = False
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1235,7 +1240,7 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
         self.bind("<Right>", lambda e: self.seek_relative(5))
         self.bind("<Escape>", lambda e: self._on_close())
 
-        self.after(100, self._start_stream)
+        self.after(50, self._init_and_play)
 
     def _build_ui(self):
         # 1. Canvas for Video Frame Rendering
@@ -1243,6 +1248,15 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", lambda e: self.toggle_play())
         self.canvas.bind("<Double-1>", lambda e: self._toggle_fullscreen())
+
+        # Loading text overlay
+        self.canvas.create_text(
+            420, 260,
+            text="⏳ 正在初始化视频流，准备播放...",
+            fill="#38bdf8",
+            font=FONT_BOLD,
+            tags=("loading_text",)
+        )
 
         # 2. Bottom Controls Bar
         ctrl_frame = tk.Frame(self, bg="#1e293b", padx=10, pady=6)
@@ -1325,15 +1339,75 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
         )
         lbl_hint.pack(side=tk.RIGHT)
 
-    def _start_stream(self):
+    def _init_and_play(self):
+        # Case 1: Direct Local File Playback
+        if os.path.exists(self.video_source):
+            self._open_opencv_capture(self.video_source)
+            return
+
+        # Case 2: Network Stream with Live Pre-Buffering (Bypasses 403 Anti-Leech & Proxy Issues)
+        self._update_loading_status("⏳ 正在通过防盗链/代理高速缓冲视频流数据...")
+        raw_hash = hashlib.md5(self.video_source.encode("utf-8", errors="ignore")).hexdigest()[:10]
+        self.temp_buffer_file = os.path.join(tempfile.gettempdir(), f"hf_preview_{raw_hash}.mp4")
+        self.is_buffering_active = True
+
+        def _buffer_worker():
+            try:
+                proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+                headers = dict(self.http_headers) if self.http_headers else {}
+                if "User-Agent" not in headers:
+                    headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                
+                resp = requests.get(self.video_source, headers=headers, proxies=proxies, stream=True, timeout=15)
+                if resp.status_code not in (200, 206):
+                    self.after(0, lambda code=resp.status_code: self._handle_stream_error(f"服务器返回 HTTP {code}，无法读取视频流。"))
+                    return
+
+                bytes_written = 0
+                has_started_cap = False
+                with open(self.temp_buffer_file, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if not self.is_buffering_active:
+                            break
+                        if chunk:
+                            f.write(chunk)
+                            bytes_written += len(chunk)
+                            
+                            # As soon as 1.2MB is buffered, launch OpenCV playback immediately!
+                            if not has_started_cap and bytes_written >= 1024 * 1024 * 1.2:
+                                has_started_cap = True
+                                self.after(0, lambda: self._open_opencv_capture(self.temp_buffer_file))
+                
+                if not has_started_cap and bytes_written > 0:
+                    self.after(0, lambda: self._open_opencv_capture(self.temp_buffer_file))
+            except Exception as e:
+                if not self.is_playing:
+                    self.after(0, lambda err=str(e): self._handle_stream_error(f"网络流缓冲失败: {err}"))
+
+        threading.Thread(target=_buffer_worker, daemon=True).start()
+
+    def _update_loading_status(self, text: str):
+        try:
+            self.canvas.delete("loading_text")
+            w = max(400, self.canvas.winfo_width()) // 2
+            h = max(300, self.canvas.winfo_height()) // 2
+            self.canvas.create_text(w, h, text=text, fill="#38bdf8", font=FONT_BOLD, tags=("loading_text",))
+        except Exception:
+            pass
+
+    def _handle_stream_error(self, msg: str):
+        messagebox.showerror("播放提示", f"{msg}\n\n建议:\n1. 确认该视频链接是否正常；\n2. 您也可以点击【浏览器中播放】或使用外部播放器。", parent=self)
+        self.destroy()
+
+    def _open_opencv_capture(self, filepath: str):
         try:
             import cv2
-            self.cap = cv2.VideoCapture(self.video_source)
+            self.cap = cv2.VideoCapture(filepath)
             if not self.cap.isOpened():
-                messagebox.showerror("播放失败", f"无法直接读取该视频流:\n{self.video_source}\n\n建议尝试使用外部全能解码器或浏览器播放。", parent=self)
-                self.destroy()
+                self._handle_stream_error("未能解析视频帧编码。")
                 return
 
+            self.canvas.delete("loading_text")
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
             if self.fps <= 0 or self.fps > 120:
@@ -1342,8 +1416,7 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
             self.is_playing = True
             self._update_frame()
         except Exception as e:
-            messagebox.showerror("播放错误", f"初始化内置播放器失败: {e}", parent=self)
-            self.destroy()
+            self._handle_stream_error(f"OpenCV 读取失败: {e}")
 
     def _update_frame(self):
         if not self.is_playing or not self.cap or not self.cap.isOpened():
@@ -1351,9 +1424,13 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
 
         ret, frame = self.cap.read()
         if not ret:
-            # End of video reached
-            self.is_playing = False
-            self.btn_play_pause.config(text="▶️ 播放")
+            # Reached current buffered end or video end
+            if not self.is_buffering_active:
+                self.is_playing = False
+                self.btn_play_pause.config(text="▶️ 播放")
+            else:
+                # Still downloading in background, wait slightly and retry
+                self.after(300, self._update_frame)
             return
 
         self.current_frame_idx += 1
@@ -1449,10 +1526,16 @@ class BuiltinTkinterPlayerDialog(tk.Toplevel):
         self.attributes("-fullscreen", self._is_fullscreen)
 
     def _on_close(self):
+        self.is_buffering_active = False
         self.is_playing = False
         if self.cap:
             try:
                 self.cap.release()
+            except Exception:
+                pass
+        if self.temp_buffer_file and os.path.exists(self.temp_buffer_file):
+            try:
+                os.remove(self.temp_buffer_file)
             except Exception:
                 pass
         self.destroy()
@@ -1462,7 +1545,7 @@ class UniversalMediaPlayer:
     """Master playback dispatcher supporting FFplay hardware accelerator, OpenCV embed player, and fallback."""
 
     @classmethod
-    def play_video(cls, video_target: str, title: str = "视频播放", http_headers: Optional[Dict[str, str]] = None, parent: Optional[tk.Widget] = None):
+    def play_video(cls, video_target: str, title: str = "视频播放", http_headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None, parent: Optional[tk.Widget] = None):
         if not video_target:
             return
 
@@ -1472,9 +1555,16 @@ class UniversalMediaPlayer:
         # Strategy 1: Ultra-Fast Dedicated FFplay Player (Supports full HEVC/AV1/VP9 codec + Audio Sync)
         if ffplay_exe:
             try:
-                clean_title = f"{title} [全格式硬件加速播放器 - 空格暂停/方向键快进/Esc退出]"
-                cmd = [ffplay_exe, "-autoexit", "-window_title", clean_title]
+                clean_title = f"{title} [全格式硬件加速播放器 - 空格暂停/方向键快退快进/Esc退出]"
+                cmd = [ffplay_exe, "-window_title", clean_title]
                 
+                # Pass proxy to subprocess environment
+                env = os.environ.copy()
+                if proxy:
+                    env["http_proxy"] = proxy
+                    env["https_proxy"] = proxy
+                    env["all_proxy"] = proxy
+
                 # If network stream with anti-leech headers (e.g. Bilibili / WeChat)
                 if not is_local and http_headers:
                     hdrs_list = []
@@ -1484,7 +1574,18 @@ class UniversalMediaPlayer:
                         cmd.extend(["-headers", "".join(hdrs_list)])
 
                 cmd.append(video_target)
-                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                creation_flags = 0
+                if sys.platform == "win32":
+                    creation_flags = subprocess.CREATE_NO_WINDOW
+
+                subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=creation_flags
+                )
                 return
             except Exception:
                 pass
@@ -1492,7 +1593,7 @@ class UniversalMediaPlayer:
         # Strategy 2: Pure Python Built-in Embedded Canvas Player (Guaranteed Zero-Dependency Playback)
         if parent:
             try:
-                BuiltinTkinterPlayerDialog(parent, video_target, title_text=title, http_headers=http_headers)
+                BuiltinTkinterPlayerDialog(parent, video_target, title_text=title, http_headers=http_headers, proxy=proxy)
                 return
             except Exception:
                 pass
@@ -1653,7 +1754,7 @@ class MediaPreviewDialog(tk.Toplevel):
             return
         title = self.media_data.get("text") or "视频预览"
         headers = self.current_variant.get("http_headers")
-        UniversalMediaPlayer.play_video(target, title=title, http_headers=headers, parent=self)
+        UniversalMediaPlayer.play_video(target, title=title, http_headers=headers, proxy=self.proxy, parent=self)
 
     def open_embedded_player(self):
         target = self.local_file_path or self.direct_url
@@ -1661,7 +1762,7 @@ class MediaPreviewDialog(tk.Toplevel):
             return
         title = self.media_data.get("text") or "视频播放"
         headers = self.current_variant.get("http_headers")
-        BuiltinTkinterPlayerDialog(self, target, title_text=title, http_headers=headers)
+        BuiltinTkinterPlayerDialog(self, target, title_text=title, http_headers=headers, proxy=self.proxy)
 
     def open_in_browser(self):
         target = self.local_file_path or self.direct_url
@@ -4596,15 +4697,13 @@ class HFDownloaderApp(tk.Tk):
 
                 menu = tk.Menu(self, tearoff=0)
                 target_src = local_path if has_local else v_url
-                t_title = self.tw_resolved_data.get("text") or v_name
-                hdrs = v.get("http_headers")
-
+                eff_proxy = self._get_effective_proxy()
                 if has_local:
-                    menu.add_command(label="▶️ 内置全能播放本地视频 (0 流量秒开·支持HEVC/AV1)", command=lambda: UniversalMediaPlayer.play_video(target_src, title=t_title, http_headers=hdrs, parent=self))
+                    menu.add_command(label="▶️ 内置全能播放本地视频 (0 流量秒开·支持HEVC/AV1)", command=lambda: UniversalMediaPlayer.play_video(target_src, title=t_title, http_headers=hdrs, proxy=eff_proxy, parent=self))
                     menu.add_command(label="🎬 详细预览与封面信息 (包含本地信息)", command=self.preview_twitter_video)
                     menu.add_command(label="📂 打开本地文件所在文件夹", command=lambda: os.startfile(os.path.dirname(local_path)) if sys.platform == "win32" else None)
                 else:
-                    menu.add_command(label="▶️ 内置全能播放器在线预览 (支持HEVC/AV1/全格式)", command=lambda: UniversalMediaPlayer.play_video(target_src, title=t_title, http_headers=hdrs, parent=self))
+                    menu.add_command(label="▶️ 内置全能播放器在线预览 (支持HEVC/AV1/全格式)", command=lambda: UniversalMediaPlayer.play_video(target_src, title=t_title, http_headers=hdrs, proxy=eff_proxy, parent=self))
                     menu.add_command(label="🎬 详细封面与预览弹窗", command=self.preview_twitter_video)
                     menu.add_command(label="🌐 在浏览器中打开播放直链", command=lambda: os.startfile(v_url) if sys.platform == "win32" else None)
                 
