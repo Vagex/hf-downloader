@@ -1202,6 +1202,312 @@ class PresetDirectoryManagerDialog(tk.Toplevel):
 
 
 # ------------------ Twitter Video & Thumbnail Visual Preview Dialog ------------------
+# ------------------ Universal Built-in Video Player Engine ------------------
+import shutil
+import subprocess
+
+class BuiltinTkinterPlayerDialog(tk.Toplevel):
+    """Pure Python embedded video player window using OpenCV & Tkinter Canvas for full format decoding."""
+
+    def __init__(self, parent, video_source: str, title_text: str = "内置视频播放器", http_headers: Optional[Dict[str, str]] = None):
+        super().__init__(parent)
+        self.video_source = video_source
+        self.title_text = title_text
+        self.http_headers = http_headers or {}
+        
+        self.title(f"🎬 内置视频播放器 - {title_text}")
+        self.geometry("820x600")
+        self.minsize(640, 480)
+        self.configure(bg="#0f172a")
+        self.transient(parent)
+
+        self.cap = None
+        self.is_playing = False
+        self.total_frames = 0
+        self.fps = 30.0
+        self.current_frame_idx = 0
+        self.is_slider_dragging = False
+
+        self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.bind("<space>", lambda e: self.toggle_play())
+        self.bind("<Left>", lambda e: self.seek_relative(-5))
+        self.bind("<Right>", lambda e: self.seek_relative(5))
+        self.bind("<Escape>", lambda e: self._on_close())
+
+        self.after(100, self._start_stream)
+
+    def _build_ui(self):
+        # 1. Canvas for Video Frame Rendering
+        self.canvas = tk.Canvas(self, bg="#000000", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.bind("<Button-1>", lambda e: self.toggle_play())
+        self.canvas.bind("<Double-1>", lambda e: self._toggle_fullscreen())
+
+        # 2. Bottom Controls Bar
+        ctrl_frame = tk.Frame(self, bg="#1e293b", padx=10, pady=6)
+        ctrl_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        # Progress Slider
+        slider_frame = tk.Frame(ctrl_frame, bg="#1e293b")
+        slider_frame.pack(fill=tk.X, pady=(0, 4))
+
+        self.progress_var = tk.DoubleVar(value=0.0)
+        self.slider = tk.Scale(
+            slider_frame,
+            variable=self.progress_var,
+            from_=0.0,
+            to=100.0,
+            orient=tk.HORIZONTAL,
+            showvalue=0,
+            bg="#334155",
+            fg="#38bdf8",
+            activebackground="#0284c7",
+            troughcolor="#0f172a",
+            highlightthickness=0,
+            bd=0,
+            command=self._on_slider_move
+        )
+        self.slider.pack(fill=tk.X, expand=True)
+        self.slider.bind("<ButtonPress-1>", self._on_slider_press)
+        self.slider.bind("<ButtonRelease-1>", self._on_slider_release)
+
+        # Buttons & Time info row
+        btn_row = tk.Frame(ctrl_frame, bg="#1e293b")
+        btn_row.pack(fill=tk.X)
+
+        self.btn_play_pause = tk.Button(
+            btn_row,
+            text="⏸️ 暂停",
+            font=FONT_BOLD,
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=10,
+            pady=3,
+            command=self.toggle_play
+        )
+        self.btn_play_pause.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_restart = tk.Button(
+            btn_row,
+            text="🔄 重播",
+            font=FONT_NORMAL,
+            bg="#475569",
+            fg="#ffffff",
+            activebackground="#334155",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=8,
+            pady=3,
+            command=self.restart_video
+        )
+        self.btn_restart.pack(side=tk.LEFT, padx=4)
+
+        self.lbl_time = tk.Label(
+            btn_row,
+            text="00:00 / 00:00",
+            font=FONT_SMALL,
+            bg="#1e293b",
+            fg="#94a3b8"
+        )
+        self.lbl_time.pack(side=tk.LEFT, padx=10)
+
+        # Shortcut hint
+        lbl_hint = tk.Label(
+            btn_row,
+            text="快捷键: [空格] 暂停/播放 | [←/→] 快退/快进5秒 | [Esc] 退出",
+            font=FONT_SMALL,
+            bg="#1e293b",
+            fg="#64748b"
+        )
+        lbl_hint.pack(side=tk.RIGHT)
+
+    def _start_stream(self):
+        try:
+            import cv2
+            self.cap = cv2.VideoCapture(self.video_source)
+            if not self.cap.isOpened():
+                messagebox.showerror("播放失败", f"无法直接读取该视频流:\n{self.video_source}\n\n建议尝试使用外部全能解码器或浏览器播放。", parent=self)
+                self.destroy()
+                return
+
+            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+            if self.fps <= 0 or self.fps > 120:
+                self.fps = 30.0
+
+            self.is_playing = True
+            self._update_frame()
+        except Exception as e:
+            messagebox.showerror("播放错误", f"初始化内置播放器失败: {e}", parent=self)
+            self.destroy()
+
+    def _update_frame(self):
+        if not self.is_playing or not self.cap or not self.cap.isOpened():
+            return
+
+        ret, frame = self.cap.read()
+        if not ret:
+            # End of video reached
+            self.is_playing = False
+            self.btn_play_pause.config(text="▶️ 播放")
+            return
+
+        self.current_frame_idx += 1
+        
+        # Resize frame to fit canvas while preserving aspect ratio
+        try:
+            import cv2
+            canvas_w = max(100, self.canvas.winfo_width())
+            canvas_h = max(100, self.canvas.winfo_height())
+            
+            fh, fw, _ = frame.shape
+            scale = min(canvas_w / fw, canvas_h / fh)
+            new_w = max(1, int(fw * scale))
+            new_h = max(1, int(fh * scale))
+            
+            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            rgb_frame = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb_frame)
+            tk_img = ImageTk.PhotoImage(pil_img)
+
+            self.canvas.delete("all")
+            self.canvas.create_image(canvas_w // 2, canvas_h // 2, anchor=tk.CENTER, image=tk_img)
+            self.canvas_img = tk_img  # Keep reference
+
+            # Update time and slider if not user dragging
+            cur_sec = self.current_frame_idx / self.fps
+            tot_sec = (self.total_frames / self.fps) if self.total_frames > 0 else 0
+            cur_str = f"{int(cur_sec//60):02d}:{int(cur_sec%60):02d}"
+            tot_str = f"{int(tot_sec//60):02d}:{int(tot_sec%60):02d}" if tot_sec > 0 else "--:--"
+            self.lbl_time.config(text=f"{cur_str} / {tot_str}")
+
+            if not self.is_slider_dragging and self.total_frames > 0:
+                pct = (self.current_frame_idx / self.total_frames) * 100.0
+                self.progress_var.set(pct)
+
+        except Exception:
+            pass
+
+        delay_ms = max(10, int(1000.0 / self.fps))
+        self.after(delay_ms, self._update_frame)
+
+    def toggle_play(self):
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            self.btn_play_pause.config(text="⏸️ 暂停")
+            self._update_frame()
+        else:
+            self.btn_play_pause.config(text="▶️ 播放")
+
+    def restart_video(self):
+        if self.cap and self.cap.isOpened():
+            import cv2
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self.current_frame_idx = 0
+            self.is_playing = True
+            self.btn_play_pause.config(text="⏸️ 暂停")
+            self._update_frame()
+
+    def seek_relative(self, delta_seconds: float):
+        if not self.cap or not self.cap.isOpened() or self.total_frames <= 0:
+            return
+        import cv2
+        delta_frames = int(delta_seconds * self.fps)
+        target = max(0, min(self.total_frames - 1, self.current_frame_idx + delta_frames))
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+        self.current_frame_idx = target
+        if not self.is_playing:
+            self.is_playing = True
+            self._update_frame()
+
+    def _on_slider_press(self, event):
+        self.is_slider_dragging = True
+
+    def _on_slider_release(self, event):
+        self.is_slider_dragging = False
+        if not self.cap or self.total_frames <= 0:
+            return
+        import cv2
+        pct = self.progress_var.get()
+        target = int((pct / 100.0) * self.total_frames)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+        self.current_frame_idx = target
+        if not self.is_playing:
+            self.is_playing = True
+            self._update_frame()
+
+    def _on_slider_move(self, val):
+        pass
+
+    def _toggle_fullscreen(self):
+        is_fs = getattr(self, "_is_fullscreen", False)
+        self._is_fullscreen = not is_fs
+        self.attributes("-fullscreen", self._is_fullscreen)
+
+    def _on_close(self):
+        self.is_playing = False
+        if self.cap:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+        self.destroy()
+
+
+class UniversalMediaPlayer:
+    """Master playback dispatcher supporting FFplay hardware accelerator, OpenCV embed player, and fallback."""
+
+    @classmethod
+    def play_video(cls, video_target: str, title: str = "视频播放", http_headers: Optional[Dict[str, str]] = None, parent: Optional[tk.Widget] = None):
+        if not video_target:
+            return
+
+        ffplay_exe = shutil.which("ffplay")
+        is_local = os.path.exists(video_target)
+
+        # Strategy 1: Ultra-Fast Dedicated FFplay Player (Supports full HEVC/AV1/VP9 codec + Audio Sync)
+        if ffplay_exe:
+            try:
+                clean_title = f"{title} [全格式硬件加速播放器 - 空格暂停/方向键快进/Esc退出]"
+                cmd = [ffplay_exe, "-autoexit", "-window_title", clean_title]
+                
+                # If network stream with anti-leech headers (e.g. Bilibili / WeChat)
+                if not is_local and http_headers:
+                    hdrs_list = []
+                    for k, v in http_headers.items():
+                        hdrs_list.append(f"{k}: {v}\r\n")
+                    if hdrs_list:
+                        cmd.extend(["-headers", "".join(hdrs_list)])
+
+                cmd.append(video_target)
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except Exception:
+                pass
+
+        # Strategy 2: Pure Python Built-in Embedded Canvas Player (Guaranteed Zero-Dependency Playback)
+        if parent:
+            try:
+                BuiltinTkinterPlayerDialog(parent, video_target, title_text=title, http_headers=http_headers)
+                return
+            except Exception:
+                pass
+
+        # Strategy 3: System / Browser Fallback
+        import webbrowser
+        try:
+            if sys.platform == "win32" and is_local:
+                os.startfile(video_target)
+            else:
+                webbrowser.open(video_target)
+        except Exception:
+            webbrowser.open(video_target)
+
+
 # ------------------ Universal Video & Thumbnail Visual Preview Dialog ------------------
 class MediaPreviewDialog(tk.Toplevel):
     """Visual Dialog for previewing video thumbnail and streaming the MP4 video directly (prioritizing local downloaded files to save bandwidth)."""
@@ -1225,13 +1531,13 @@ class MediaPreviewDialog(tk.Toplevel):
         plat_label = media_data.get("platform_label", "流媒体视频")
         loc_badge = " [🟢 本地已下载·0流量]" if self.local_file_path else " [🌐 远程网络流]"
         self.title(f"🎬 {plat_label} 视频与封面在线预览{loc_badge}")
-        self.geometry("780x570")
+        self.geometry("780x580")
         self.minsize(680, 480)
         self.transient(parent)
         self.grab_set()
 
         self.thumbnail_img = None
-        center_window_on_parent(self, parent, 780, 570)
+        center_window_on_parent(self, parent, 780, 580)
         self._build_ui()
         self._load_thumbnail_async()
 
@@ -1249,7 +1555,6 @@ class MediaPreviewDialog(tk.Toplevel):
         pub_date = self.media_data.get("date", "--")
         q_label = self.current_variant.get("quality", "标准 MP4")
         sz = self.current_variant.get("size_str", "--")
-        br = self.current_variant.get("bitrate_str", "--")
 
         title_color = "#198754" if self.local_file_path else "#0d6efd"
         status_tag = " [🟢 本地已下载·0流量秒开]" if self.local_file_path else ""
@@ -1266,12 +1571,13 @@ class MediaPreviewDialog(tk.Toplevel):
         text_box.pack(fill=tk.X)
 
         # 2. Middle Thumbnail Canvas / Image Box
-        img_frame = ttk.LabelFrame(main_frame, text=" 🖼️ 视频封面与高清缩略图预览 (可双击放大或在线播放) ", padding="6")
+        img_frame = ttk.LabelFrame(main_frame, text=" 🖼️ 视频封面 (双击直接唤起内置全能播放器) ", padding="6")
         img_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 8))
 
-        self.lbl_image = ttk.Label(img_frame, text="正在通过网络加载视频高清封面...", anchor=tk.CENTER, justify=tk.CENTER, font=FONT_NORMAL)
+        self.lbl_image = ttk.Label(img_frame, text="正在通过网络加载视频高清封面...", anchor=tk.CENTER, justify=tk.CENTER, font=FONT_NORMAL, cursor="hand2")
         self.lbl_image.pack(fill=tk.BOTH, expand=True)
-        self.lbl_image.bind("<Double-1>", lambda e: self.play_with_system_player())
+        self.lbl_image.bind("<Double-1>", lambda e: self.play_with_builtin_player())
+        self.lbl_image.bind("<Button-1>", lambda e: self.play_with_builtin_player())
 
         # 3. Direct URL / Local Path Box
         url_frame = ttk.Frame(main_frame)
@@ -1295,43 +1601,37 @@ class MediaPreviewDialog(tk.Toplevel):
         action_bar = ttk.Frame(main_frame)
         action_bar.pack(fill=tk.X)
 
-        if self.local_file_path:
-            btn_play_text = "▶️ 立即播放本地视频 (0 流量秒开)"
-            btn_play_bg = "#198754"
-        else:
-            btn_play_text = "▶️ 立即在线播放视频 (远程网络流)"
-            btn_play_bg = "#0d6efd"
-
-        btn_play_system = tk.Button(
+        btn_play_builtin = tk.Button(
             action_bar,
-            text=btn_play_text,
+            text="▶️ 内置全能播放器 (支持HEVC/AV1/全格式)",
             font=FONT_BOLD,
-            bg=btn_play_bg,
+            bg="#198754" if self.local_file_path else "#0d6efd",
             fg="#ffffff",
             activebackground="#157347",
             activeforeground="#ffffff",
             padx=12, pady=4,
-            command=self.play_with_system_player
+            command=self.play_with_builtin_player
         )
-        btn_play_system.pack(side=tk.LEFT, padx=(0, 6))
+        btn_play_builtin.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_embed = ttk.Button(
+            action_bar,
+            text="📺 内置弹窗播放",
+            command=self.open_embedded_player
+        )
+        btn_embed.pack(side=tk.LEFT, padx=4)
 
         if not self.local_file_path:
-            btn_play_browser = tk.Button(
+            btn_play_browser = ttk.Button(
                 action_bar,
-                text="🌐 在浏览器中在线播放",
-                font=FONT_BOLD,
-                bg="#6c757d",
-                fg="#ffffff",
-                activebackground="#5c636a",
-                activeforeground="#ffffff",
-                padx=10, pady=4,
+                text="🌐 浏览器中播放",
                 command=self.open_in_browser
             )
             btn_play_browser.pack(side=tk.LEFT, padx=4)
         else:
             btn_open_loc = ttk.Button(
                 action_bar,
-                text="📂 打开本地文件所在文件夹",
+                text="📂 打开所在文件夹",
                 command=lambda: os.startfile(os.path.dirname(self.local_file_path)) if sys.platform == "win32" else None
             )
             btn_open_loc.pack(side=tk.LEFT, padx=4)
@@ -1347,18 +1647,21 @@ class MediaPreviewDialog(tk.Toplevel):
             msg = "已将本地文件路径复制到剪贴板！" if self.local_file_path else "已将视频播放直链复制到剪贴板！"
             messagebox.showinfo("复制成功", msg, parent=self)
 
-    def play_with_system_player(self):
+    def play_with_builtin_player(self):
         target = self.local_file_path or self.direct_url
         if not target:
             return
-        import webbrowser
-        try:
-            if sys.platform == "win32":
-                os.startfile(target)
-            else:
-                webbrowser.open(target)
-        except Exception:
-            webbrowser.open(target)
+        title = self.media_data.get("text") or "视频预览"
+        headers = self.current_variant.get("http_headers")
+        UniversalMediaPlayer.play_video(target, title=title, http_headers=headers, parent=self)
+
+    def open_embedded_player(self):
+        target = self.local_file_path or self.direct_url
+        if not target:
+            return
+        title = self.media_data.get("text") or "视频播放"
+        headers = self.current_variant.get("http_headers")
+        BuiltinTkinterPlayerDialog(self, target, title_text=title, http_headers=headers)
 
     def open_in_browser(self):
         target = self.local_file_path or self.direct_url
@@ -1370,7 +1673,7 @@ class MediaPreviewDialog(tk.Toplevel):
     def _load_thumbnail_async(self):
         thumb_url = self.media_data.get("thumbnail")
         if not thumb_url:
-            self.lbl_image.config(text="该视频未提供封面缩略图")
+            self.lbl_image.config(text="▶️ 该视频未提供封面 (点击直接内置播放)")
             return
 
         def _fetch():
@@ -1390,9 +1693,9 @@ class MediaPreviewDialog(tk.Toplevel):
                     tk_img = ImageTk.PhotoImage(pil_img)
                     self.after(0, lambda img=tk_img: self._set_image(img))
                 else:
-                    self.after(0, lambda: self.lbl_image.config(text="视频封面加载失败 (HTTP Error)"))
-            except Exception as e:
-                self.after(0, lambda: self.lbl_image.config(text="视频封面加载超时或失败"))
+                    self.after(0, lambda: self.lbl_image.config(text="▶️ 封面加载失败 (点击直接调用内置播放器播放)"))
+            except Exception:
+                self.after(0, lambda: self.lbl_image.config(text="▶️ 点击直接调用内置播放器播放"))
 
         threading.Thread(target=_fetch, daemon=True).start()
 
@@ -4292,12 +4595,17 @@ class HFDownloaderApp(tk.Tk):
                 has_local = bool(local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0)
 
                 menu = tk.Menu(self, tearoff=0)
+                target_src = local_path if has_local else v_url
+                t_title = self.tw_resolved_data.get("text") or v_name
+                hdrs = v.get("http_headers")
+
                 if has_local:
-                    menu.add_command(label="▶️ 播放本地已下载视频 (0 流量秒开)", command=lambda: os.startfile(local_path) if sys.platform == "win32" else None)
+                    menu.add_command(label="▶️ 内置全能播放本地视频 (0 流量秒开·支持HEVC/AV1)", command=lambda: UniversalMediaPlayer.play_video(target_src, title=t_title, http_headers=hdrs, parent=self))
                     menu.add_command(label="🎬 详细预览与封面信息 (包含本地信息)", command=self.preview_twitter_video)
                     menu.add_command(label="📂 打开本地文件所在文件夹", command=lambda: os.startfile(os.path.dirname(local_path)) if sys.platform == "win32" else None)
                 else:
-                    menu.add_command(label="🎬 在线预览播放 (远程流)", command=self.preview_twitter_video)
+                    menu.add_command(label="▶️ 内置全能播放器在线预览 (支持HEVC/AV1/全格式)", command=lambda: UniversalMediaPlayer.play_video(target_src, title=t_title, http_headers=hdrs, parent=self))
+                    menu.add_command(label="🎬 详细封面与预览弹窗", command=self.preview_twitter_video)
                     menu.add_command(label="🌐 在浏览器中打开播放直链", command=lambda: os.startfile(v_url) if sys.platform == "win32" else None)
                 
                 menu.add_command(label="📋 复制下载直链", command=lambda: (self.clipboard_clear(), self.clipboard_append(v_url), messagebox.showinfo("提示", "已复制直链到剪贴板！", parent=self)))

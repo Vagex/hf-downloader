@@ -3065,8 +3065,24 @@ def main(page: ft.Page):
                     for t in tasks
                 )
 
-            def make_play_handler(local_p, remote_u, is_loc):
+            def make_play_handler(local_p, remote_u, is_loc, v_item):
                 def _play(e):
+                    target = local_p if is_loc else remote_u
+                    import shutil, subprocess
+                    ffplay_exe = shutil.which("ffplay")
+                    if ffplay_exe:
+                        try:
+                            cmd = [ffplay_exe, "-autoexit", "-window_title", f"{v_item.get('quality', '视频')} [内置全格式播放器 - 空格暂停/Esc退出]"]
+                            hdrs = v_item.get("http_headers")
+                            if not is_loc and hdrs:
+                                h_str = "".join(f"{k}: {val}\r\n" for k, val in hdrs.items())
+                                if h_str:
+                                    cmd.extend(["-headers", h_str])
+                            cmd.append(target)
+                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            return
+                        except:
+                            pass
                     if is_loc and sys.platform == "win32":
                         try:
                             os.startfile(local_p)
@@ -3092,8 +3108,8 @@ def main(page: ft.Page):
                                 icon=ft.Icons.PLAY_CIRCLE_FILL,
                                 icon_color=COLOR_SUCCESS if has_local else COLOR_ACCENT,
                                 icon_size=18,
-                                tooltip="▶️ 播放本地已下载视频 (0 流量秒开)" if has_local else "🌐 在线预览播放视频 (远程网络流)",
-                                on_click=make_play_handler(loc_path, v["url"], has_local)
+                                tooltip="▶️ 内置全能播放 (支持HEVC/AV1/全格式)" if has_local else "🌐 在线预览播放视频 (远程网络流)",
+                                on_click=make_play_handler(loc_path, v["url"], has_local, v)
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.DOWNLOAD,
