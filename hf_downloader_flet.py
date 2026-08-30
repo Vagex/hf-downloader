@@ -220,241 +220,326 @@ DEFAULT_GITHUB_ACCELERATORS = [
     "不使用加速 (官方直连)"
 ]
 
-class TwitterMediaResolver:
-    """High-reliability multi-engine parser for Twitter / X media with 4-layer resolution matrix."""
+class UniversalMediaResolver:
+    """High-reliability multi-platform universal media parser for Bilibili, WeChat, Twitter/X, and 1000+ sites."""
 
     @staticmethod
-    def extract_tweet_id(raw_input: str) -> Optional[str]:
-        if not raw_input:
-            return None
-        raw_input = raw_input.strip()
-        m = re.search(r'status/(\d+)', raw_input)
-        if m:
-            return m.group(1)
-        m = re.search(r'^\d+$', raw_input)
-        if m:
-            return m.group(0)
-        return None
+    def detect_platform(raw_input: str) -> str:
+        s = raw_input.strip().lower()
+        if "bilibili.com" in s or "b23.tv" in s or re.search(r'\b(bv[a-za-z0-9]{10}|av\d+)\b', s):
+            return "bilibili"
+        if "mp.weixin.qq.com" in s:
+            return "wechat_article"
+        if "channels.weixin.qq.com" in s or "weixin.qq.com/sph" in s:
+            return "wechat_channels"
+        if "twitter.com" in s or "x.com" in s or "t.co" in s or re.match(r'^\d+$', s.strip()):
+            return "twitter"
+        return "universal"
 
     @classmethod
     def resolve(cls, raw_input: str, proxy: Optional[str] = None) -> Dict[str, Any]:
-        """Resolves tweet media information with 4 fallback strategies (FxTwitter, VxTwitter, yt-dlp, Syndication)."""
-        tweet_id = cls.extract_tweet_id(raw_input)
-        if not tweet_id and "http" not in raw_input:
-            raise ValueError("请输入有效的 Twitter / X 推文链接或 Tweet ID！")
+        if not raw_input or not raw_input.strip():
+            raise ValueError("请输入有效的视频链接或推文/视频 ID！")
+        raw_input = raw_input.strip()
+        platform = cls.detect_platform(raw_input)
+
+        if platform == "bilibili":
+            return cls._resolve_bilibili(raw_input, proxy)
+        elif platform == "wechat_article":
+            return cls._resolve_wechat_article(raw_input, proxy)
+        elif platform == "wechat_channels":
+            return cls._resolve_wechat_channels(raw_input, proxy)
+        elif platform == "twitter":
+            return cls._resolve_twitter(raw_input, proxy)
+        else:
+            return cls._resolve_universal(raw_input, proxy)
+
+    # ---------------- Bilibili Resolver (Official View/PlayURL API + yt-dlp) ----------------
+    @classmethod
+    def _resolve_bilibili(cls, raw_input: str, proxy: Optional[str]) -> Dict[str, Any]:
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Referer": "https://www.bilibili.com/"
+        }
+
+        # Follow 302 redirects for b23.tv short links
+        clean_url = raw_input
+        if "b23.tv" in clean_url:
+            try:
+                r_redir = requests.head(clean_url, headers=headers, proxies=proxies, allow_redirects=True, timeout=8)
+                clean_url = r_redir.url
+            except Exception:
+                pass
+
+        m_bv = re.search(r'(BV[a-zA-Z0-9]{10})', clean_url, re.IGNORECASE)
+        m_av = re.search(r'av(\d+)', clean_url, re.IGNORECASE)
+        bvid = m_bv.group(1) if m_bv else (f"av{m_av.group(1)}" if m_av else None)
+
+        if bvid:
+            try:
+                # 1. Fetch metadata from Bilibili View API
+                view_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}" if bvid.upper().startswith("BV") else f"https://api.bilibili.com/x/web-interface/view?aid={bvid[2:]}"
+                r_view = requests.get(view_url, headers=headers, proxies=proxies, timeout=10)
+                if r_view.status_code == 200:
+                    v_json = r_view.json()
+                    if v_json.get("code") == 0:
+                        v_data = v_json.get("data", {})
+                        title = v_data.get("title", "Bilibili 视频")
+                        author = v_data.get("owner", {}).get("name", "Bilibili UP主")
+                        author_id = f"UID: {v_data.get('owner', {}).get('mid', '')}"
+                        thumbnail = v_data.get("pic")
+                        cid = v_data.get("cid")
+                        dur_sec = v_data.get("duration", 0)
+                        dur_str = f"{int(dur_sec//60)}:{int(dur_sec%60):02d}" if dur_sec else "--"
+                        pub_time = v_data.get("pubdate")
+                        pub_date = datetime.fromtimestamp(pub_time).strftime("%Y-%m-%d %H:%M") if pub_time else datetime.now().strftime("%Y-%m-%d %H:%M")
+
+                        # 2. Fetch PlayURL for high-res stream
+                        play_url = f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}&qn=80&fnval=1" if bvid.upper().startswith("BV") else f"https://api.bilibili.com/x/player/playurl?aid={bvid[2:]}&cid={cid}&qn=80&fnval=1"
+                        r_play = requests.get(play_url, headers=headers, proxies=proxies, timeout=10)
+                        variants_list = []
+                        if r_play.status_code == 200:
+                            p_json = r_play.json()
+                            if p_json.get("code") == 0:
+                                p_data = p_json.get("data", {})
+                                durl_list = p_data.get("durl", [])
+                                for d in durl_list:
+                                    v_stream_url = d.get("url")
+                                    v_size = d.get("size", 0)
+                                    v_sz_str = f"{v_size / (1024*1024):.2f} MB" if v_size else "--"
+                                    clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"bilibili_{author}_{bvid}.mp4")
+                                    variants_list.append({
+                                        "quality": "🎬 1080P/720P 高清 (B站官方原生流)",
+                                        "height": 1080,
+                                        "bitrate": 0,
+                                        "bitrate_str": "--",
+                                        "size_str": v_sz_str,
+                                        "raw_size": v_size,
+                                        "url": v_stream_url,
+                                        "filename": clean_fn,
+                                        "http_headers": headers
+                                    })
+                        if variants_list:
+                            return {
+                                "platform": "bilibili",
+                                "platform_label": "📺 哔哩哔哩 (Bilibili)",
+                                "media_id": bvid,
+                                "author": author,
+                                "author_id": author_id,
+                                "text": title.strip(),
+                                "date": pub_date,
+                                "duration": dur_str,
+                                "thumbnail": thumbnail,
+                                "variants": variants_list
+                            }
+            except Exception:
+                pass
+
+        # Strategy 2: Fallback to Universal yt-dlp
+        return cls._resolve_universal(clean_url, proxy, override_label="📺 哔哩哔哩 (Bilibili)")
+
+    # ---------------- WeChat Article Video Resolver ----------------
+    @classmethod
+    def _resolve_wechat_article(cls, article_url: str, proxy: Optional[str]) -> Dict[str, Any]:
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Referer": "https://mp.weixin.qq.com/"
+        }
+        resp = requests.get(article_url, headers=headers, proxies=proxies, timeout=12)
+        if resp.status_code != 200:
+            raise ValueError(f"无法访问微信公众号文章 (HTTP {resp.status_code})！")
+
+        html = resp.text
+        m_title = re.search(r'<meta\s+property=[\'"]og:title[\'"]\s+content=[\'"](.*?)[\'"]', html) or re.search(r'var\s+msg_title\s*=\s*[\'"](.*?)[\'"]', html)
+        title = m_title.group(1) if m_title else "微信公众号文章视频"
+        m_author = re.search(r'<meta\s+property=[\'"]og:article:author[\'"]\s+content=[\'"](.*?)[\'"]', html) or re.search(r'var\s+nickname\s*=\s*[\'"](.*?)[\'"]', html)
+        author = m_author.group(1) if m_author else "微信公众号"
+        m_thumb = re.search(r'<meta\s+property=[\'"]og:image[\'"]\s+content=[\'"](.*?)[\'"]', html) or re.search(r'var\s+msg_cdn_url\s*=\s*[\'"](.*?)[\'"]', html)
+        thumbnail = m_thumb.group(1) if m_thumb else None
+        m_date = re.search(r'var\s+createTime\s*=\s*[\'"]?(\d+)[\'"]?', html)
+        if m_date:
+            try:
+                pub_date = datetime.fromtimestamp(int(m_date.group(1))).strftime("%Y-%m-%d %H:%M")
+            except:
+                pub_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        else:
+            pub_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        vids = list(dict.fromkeys(re.findall(r'vid=(wxv_\d+)', html) + re.findall(r'data-mpvid=[\'"](wxv_\d+)[\'"]', html) + re.findall(r'[\'"](wxv_\d+)[\'"]', html)))
+        variants_list = []
+        dur_str = "--"
+
+        for vid in vids:
+            api_url = f"https://mp.weixin.qq.com/mp/videoplayer?action=get_mp_video_play_url&preview=0&vid={vid}&f=json"
+            r_api = requests.get(api_url, headers=headers, proxies=proxies, timeout=10)
+            if r_api.status_code == 200:
+                try:
+                    data = r_api.json()
+                    url_info = data.get("url_info", [])
+                    for item in url_info:
+                        furl = item.get("url")
+                        if not furl:
+                            continue
+                        f_fmt = item.get("video_quality_wording") or "高清 MP4"
+                        filesize = item.get("filesize", 0)
+                        dur_ms = item.get("duration_ms", 0)
+                        if dur_ms:
+                            dur_sec = dur_ms / 1000
+                            dur_str = f"{int(dur_sec//60)}:{int(dur_sec%60):02d}"
+                        
+                        sz_str = f"{filesize/(1024*1024):.2f} MB" if filesize else "--"
+                        clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"wechat_{author}_{vid}_{f_fmt}.mp4")
+
+                        variants_list.append({
+                            "quality": f"🎬 {f_fmt} (微信原生直链)",
+                            "height": filesize or 720,
+                            "bitrate": 0,
+                            "bitrate_str": "--",
+                            "size_str": sz_str,
+                            "raw_size": filesize or 0,
+                            "url": furl,
+                            "filename": clean_fn,
+                            "http_headers": headers
+                        })
+                except Exception:
+                    pass
+
+        if not variants_list:
+            try:
+                res_uni = cls._resolve_universal(article_url, proxy, override_label="📰 微信公众号视频")
+                return res_uni
+            except Exception:
+                pass
+
+        if not variants_list:
+            raise ValueError("未能从该微信公众号文章中提取到视频，请确认文章内是否包含视频！")
+
+        return {
+            "platform": "wechat_article",
+            "platform_label": "📰 微信公众号视频",
+            "media_id": vids[0] if vids else "wechat",
+            "author": author,
+            "author_id": "@微信公众号",
+            "text": title.strip(),
+            "date": pub_date,
+            "duration": dur_str,
+            "thumbnail": thumbnail,
+            "variants": variants_list
+        }
+
+    # ---------------- WeChat Channels Resolver ----------------
+    @classmethod
+    def _resolve_wechat_channels(cls, raw_input: str, proxy: Optional[str]) -> Dict[str, Any]:
+        return cls._resolve_universal(raw_input, proxy, override_label="📱 微信视频号 (Channels)")
+
+    # ---------------- Twitter / X 4-Layer Resolver ----------------
+    @classmethod
+    def _resolve_twitter(cls, raw_input: str, proxy: Optional[str]) -> Dict[str, Any]:
+        tweet_id = None
+        m = re.search(r'status/(\d+)', raw_input)
+        if m:
+            tweet_id = m.group(1)
+        elif re.match(r'^\d+$', raw_input.strip()):
+            tweet_id = raw_input.strip()
 
         target_url = f"https://twitter.com/i/status/{tweet_id}" if tweet_id else raw_input.strip()
         last_error_details = []
 
-        # Strategy 1: FxTwitter High-Speed Global CDN API (Fastest, zero-config, direct connection support)
+        # Strategy 1: FxTwitter High-Speed Global CDN API
         if tweet_id:
             try:
-                res = cls._resolve_via_fxtwitter(tweet_id, proxy)
-                if res and res.get("variants"):
-                    return res
+                url = f"https://api.fxtwitter.com/status/{tweet_id}"
+                proxies = {"http": proxy, "https": proxy} if proxy else None
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                resp = requests.get(url, headers=headers, proxies=proxies, timeout=8)
+                if resp.status_code == 200:
+                    tweet = resp.json().get("tweet", {})
+                    if tweet:
+                        author_info = tweet.get("author", {})
+                        author = author_info.get("name", "Twitter 用户")
+                        screen_name = author_info.get("screen_name", "")
+                        text = tweet.get("text", "")
+                        pub_date = tweet.get("created_at", "")[:16].replace("T", " ") if tweet.get("created_at") else datetime.now().strftime("%Y-%m-%d %H:%M")
+                        
+                        all_media = tweet.get("media", {}).get("all", []) or tweet.get("media", {}).get("videos", [])
+                        if all_media:
+                            first_v = all_media[0]
+                            thumbnail = first_v.get("thumbnail_url")
+                            dur_sec = first_v.get("duration")
+                            dur_str = f"{int(dur_sec//60)}:{int(dur_sec%60):02d}" if dur_sec else "--"
+                            raw_variants = first_v.get("variants", [])
+                            variants_list = []
+                            seen_urls = set()
+
+                            for var in raw_variants:
+                                furl = var.get("url")
+                                if not furl or furl in seen_urls:
+                                    continue
+                                seen_urls.add(furl)
+                                br = var.get("bitrate", 0)
+                                m_res = re.search(r'/(\d+)x(\d+)/', furl)
+                                if m_res:
+                                    w, h = int(m_res.group(1)), int(m_res.group(2))
+                                    h_min = min(w, h)
+                                    q_label = f"🎬 {h_min}P 超清 ({w}x{h})" if h_min >= 1080 else f"🎬 {h_min}P 高清 ({w}x{h})"
+                                    clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}_{w}x{h}.mp4"
+                                else:
+                                    q_label = f"🎬 MP4 视频 ({br // 1000} kbps)" if br else "🎬 标准 MP4 视频"
+                                    clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}_{br}.mp4"
+
+                                est_size = f"{(br / 8 * dur_sec) / (1024*1024):.2f} MB" if (br and dur_sec) else "--"
+                                variants_list.append({
+                                    "quality": q_label,
+                                    "height": br,
+                                    "bitrate": br // 1000 if br else 0,
+                                    "bitrate_str": f"{br // 1000} kbps" if br else "--",
+                                    "size_str": est_size,
+                                    "raw_size": int((br / 8) * dur_sec) if (br and dur_sec) else 0,
+                                    "url": furl,
+                                    "filename": clean_fn,
+                                    "http_headers": {}
+                                })
+
+                            if variants_list:
+                                variants_list.sort(key=lambda x: x["height"], reverse=True)
+                                return {
+                                    "platform": "twitter",
+                                    "platform_label": "🐦 Twitter / X",
+                                    "media_id": tweet_id,
+                                    "author": author,
+                                    "author_id": f"@{screen_name}" if screen_name else "",
+                                    "text": text,
+                                    "date": pub_date,
+                                    "duration": dur_str,
+                                    "thumbnail": thumbnail,
+                                    "variants": variants_list
+                                }
             except Exception as e_fx:
-                last_error_details.append(f"FxTwitter API: {str(e_fx)}")
+                last_error_details.append(f"FxTwitter: {e_fx}")
 
-        # Strategy 2: VxTwitter Fast Public API Fallback
-        if tweet_id:
-            try:
-                res = cls._resolve_via_vxtwitter(tweet_id, proxy)
-                if res and res.get("variants"):
-                    return res
-            except Exception as e_vx:
-                last_error_details.append(f"VxTwitter API: {str(e_vx)}")
-
-        # Strategy 3: yt-dlp Deep Extraction Engine (Supports authenticated proxies & all stream types)
+        # Strategy 2: Universal / yt-dlp Fallback
         try:
-            res = cls._resolve_via_ytdlp(target_url, tweet_id, proxy)
-            if res and res.get("variants"):
-                return res
-        except Exception as e_ytdlp:
-            last_error_details.append(f"yt-dlp: {str(e_ytdlp)}")
-
-        # Strategy 4: Twitter Syndication Official Fallback
-        if tweet_id:
-            try:
-                res = cls._resolve_via_syndication(tweet_id, proxy)
-                if res and res.get("variants"):
-                    return res
-            except Exception as e_syn:
-                last_error_details.append(f"Syndication: {str(e_syn)}")
+            res = cls._resolve_universal(target_url, proxy, override_label="🐦 Twitter / X")
+            res["platform"] = "twitter"
+            return res
+        except Exception as e_uni:
+            last_error_details.append(f"yt-dlp: {e_uni}")
 
         err_summary = "; ".join(last_error_details) if last_error_details else "未检测到推文中的视频直链"
-        raise ValueError(f"{err_summary} (请检查推文中是否包含视频，或确认网络代理设置！)")
+        raise ValueError(f"{err_summary} (请检查推文是否包含视频或确认网络代理！)")
 
+    # ---------------- Universal 1000+ Platforms Resolver ----------------
     @classmethod
-    def _resolve_via_fxtwitter(cls, tweet_id: str, proxy: Optional[str]) -> Optional[Dict[str, Any]]:
-        url = f"https://api.fxtwitter.com/status/{tweet_id}"
-        proxies = {"http": proxy, "https": proxy} if proxy else None
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = requests.get(url, headers=headers, proxies=proxies, timeout=8)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        tweet = data.get("tweet", {})
-        if not tweet:
-            return None
-        
-        author_info = tweet.get("author", {})
-        author = author_info.get("name", "Twitter 用户")
-        screen_name = author_info.get("screen_name", "")
-        author_id = f"@{screen_name}" if screen_name else ""
-        text = tweet.get("text", "")
-        pub_date = tweet.get("created_at")
-        if pub_date:
-            pub_date = pub_date[:16].replace("T", " ")
-        else:
-            pub_date = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        media_obj = tweet.get("media", {})
-        all_media = media_obj.get("all", []) or media_obj.get("videos", [])
-        if not all_media:
-            return None
-
-        first_video = all_media[0]
-        thumbnail = first_video.get("thumbnail_url")
-        dur_sec = first_video.get("duration")
-        dur_str = f"{int(dur_sec//60)}:{int(dur_sec%60):02d}" if dur_sec else "--"
-
-        variants_list = []
-        raw_variants = first_video.get("variants", [])
-        seen_urls = set()
-
-        for var in raw_variants:
-            furl = var.get("url")
-            ctype = var.get("content_type", "")
-            if not furl or ("mp4" not in ctype and ".mp4" not in furl):
-                continue
-            if furl in seen_urls:
-                continue
-            seen_urls.add(furl)
-
-            br = var.get("bitrate", 0)
-            m_res = re.search(r'/(\d+)x(\d+)/', furl)
-            if m_res:
-                w, h = int(m_res.group(1)), int(m_res.group(2))
-                h_min = min(w, h)
-                if h_min >= 1080:
-                    q_label = f"🎬 {h_min}P 超清 ({w}x{h})"
-                elif h_min >= 720:
-                    q_label = f"🎬 {h_min}P 高清 ({w}x{h})"
-                elif h_min >= 480:
-                    q_label = f"🎬 {h_min}P 标清 ({w}x{h})"
-                else:
-                    q_label = f"🎬 {h_min}P 流畅 ({w}x{h})"
-                clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}_{w}x{h}.mp4"
-            else:
-                q_label = f"🎬 MP4 视频 ({br // 1000} kbps)" if br else "🎬 标准 MP4 视频"
-                clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}_{br}.mp4"
-
-            est_size = "--"
-            if br and dur_sec:
-                size_bytes = (br / 8) * dur_sec
-                est_size = f"{size_bytes / (1024*1024):.2f} MB"
-
-            variants_list.append({
-                "quality": q_label,
-                "height": br,
-                "bitrate": br // 1000 if br else 0,
-                "bitrate_str": f"{br // 1000} kbps" if br else "--",
-                "size_str": est_size,
-                "raw_size": int((br / 8) * dur_sec) if (br and dur_sec) else 0,
-                "url": furl,
-                "filename": clean_fn
-            })
-
-        if not variants_list and first_video.get("url"):
-            furl = first_video.get("url")
-            w = first_video.get("width", 0)
-            h = first_video.get("height", 0)
-            clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}.mp4"
-            variants_list.append({
-                "quality": f"🎬 {min(w, h)}P 原画 ({w}x{h})" if (w and h) else "🎬 原画 MP4 视频",
-                "height": h,
-                "bitrate": 0,
-                "bitrate_str": "--",
-                "size_str": "--",
-                "raw_size": 0,
-                "url": furl,
-                "filename": clean_fn
-            })
-
-        variants_list.sort(key=lambda x: x["height"], reverse=True)
-        return {
-            "tweet_id": tweet_id,
-            "author": author,
-            "author_id": author_id,
-            "text": text,
-            "date": pub_date,
-            "duration": dur_str,
-            "thumbnail": thumbnail,
-            "variants": variants_list
-        }
-
-    @classmethod
-    def _resolve_via_vxtwitter(cls, tweet_id: str, proxy: Optional[str]) -> Optional[Dict[str, Any]]:
-        url = f"https://api.vxtwitter.com/status/{tweet_id}"
-        proxies = {"http": proxy, "https": proxy} if proxy else None
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, proxies=proxies, timeout=8)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        author = data.get("user_name", "Twitter 用户")
-        screen_name = data.get("user_screen_name", "")
-        author_id = f"@{screen_name}" if screen_name else ""
-        text = data.get("text", "")
-        pub_date = data.get("date") or datetime.now().strftime("%Y-%m-%d %H:%M")
-        
-        media_ext = data.get("media_extended", [])
-        if not media_ext:
-            return None
-
-        first = media_ext[0]
-        furl = first.get("url")
-        if not furl or first.get("type") != "video":
-            return None
-
-        thumbnail = first.get("thumbnail_url")
-        dur_millis = first.get("duration_millis", 0)
-        dur_sec = dur_millis / 1000 if dur_millis else 0
-        dur_str = f"{int(dur_sec//60)}:{int(dur_sec%60):02d}" if dur_sec else "--"
-        sz = first.get("size", {})
-        w, h = sz.get("width", 0), sz.get("height", 0)
-
-        variants_list = [{
-            "quality": f"🎬 {min(w, h)}P 原画 ({w}x{h})" if (w and h) else "🎬 原画 MP4 视频",
-            "height": h or 720,
-            "bitrate": 0,
-            "bitrate_str": "--",
-            "size_str": "--",
-            "raw_size": 0,
-            "url": furl,
-            "filename": f"twitter_{screen_name or 'video'}_{tweet_id}.mp4"
-        }]
-
-        return {
-            "tweet_id": tweet_id,
-            "author": author,
-            "author_id": author_id,
-            "text": text,
-            "date": pub_date,
-            "duration": dur_str,
-            "thumbnail": thumbnail,
-            "variants": variants_list
-        }
-
-    @classmethod
-    def _resolve_via_ytdlp(cls, target_url: str, tweet_id: Optional[str], proxy: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _resolve_universal(cls, target_url: str, proxy: Optional[str], override_label: Optional[str] = None) -> Dict[str, Any]:
         import yt_dlp
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
             'skip_download': True,
-            'socket_timeout': 10,
+            'socket_timeout': 15,
             'nocheckcertificate': True
         }
         if proxy:
@@ -463,11 +548,14 @@ class TwitterMediaResolver:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(target_url, download=False)
             if not info:
-                return None
-            title = info.get('description') or info.get('title') or f"Tweet {tweet_id or ''}"
-            uploader = info.get('uploader') or info.get('channel') or "Twitter 用户"
+                raise ValueError("无法提取视频信息，请检查链接或网络代理！")
+
+            title = info.get('description') or info.get('title') or "网络视频"
+            uploader = info.get('uploader') or info.get('channel') or info.get('extractor_key') or "视频作者"
             uploader_id = info.get('uploader_id') or info.get('channel_id') or ""
             thumbnail = info.get('thumbnail')
+            duration_sec = info.get('duration') or 0
+            dur_str = f"{int(duration_sec//60)}:{int(duration_sec%60):02d}" if duration_sec else (info.get('duration_string') or "--")
             upload_date = info.get('upload_date')
             if upload_date and len(upload_date) == 8:
                 upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
@@ -490,6 +578,7 @@ class TwitterMediaResolver:
                 height = f.get('height')
                 filesize = f.get('filesize') or f.get('filesize_approx')
                 tbr = f.get('tbr') or f.get('vbr') or 0
+                format_note = f.get('format_note') or ""
 
                 if height:
                     if height >= 1080:
@@ -498,12 +587,10 @@ class TwitterMediaResolver:
                         q_label = f"🎬 720P 高清 ({width}x{height})"
                     elif height >= 480:
                         q_label = f"🎬 480P 标清 ({width}x{height})"
-                    elif height >= 360:
-                        q_label = f"🎬 360P 流畅 ({width}x{height})"
                     else:
-                        q_label = f"🎬 {height}P ({width}x{height})"
-                elif vcodec != 'none' and ('.mp4' in furl or furl.endswith('.mp4')):
-                    q_label = "🎬 标准 MP4 视频"
+                        q_label = f"🎬 {height}P 流畅 ({width}x{height})"
+                elif vcodec != 'none':
+                    q_label = f"🎬 标准 MP4 视频 [{format_note}]" if format_note else "🎬 标准 MP4 视频"
                 elif acodec != 'none' and vcodec == 'none':
                     q_label = "🎵 仅提取音频 (Audio Stream)"
                 else:
@@ -512,97 +599,45 @@ class TwitterMediaResolver:
                 size_str = "--"
                 if filesize:
                     size_str = f"{filesize / (1024*1024):.2f} MB" if filesize >= 1024*1024 else f"{filesize/1024:.1f} KB"
-                elif tbr and info.get('duration'):
-                    est = (tbr * 1000 / 8) * info.get('duration')
+                elif tbr and duration_sec:
+                    est = (tbr * 1000 / 8) * duration_sec
                     size_str = f"~{est / (1024*1024):.1f} MB"
 
-                bitrate_str = f"{int(tbr)} kbps" if tbr else "--"
-                clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"{uploader_id or 'twitter'}_{tweet_id or info.get('id')}_{height or 'video'}.mp4")
+                clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"{uploader_id or 'media'}_{info.get('id') or 'video'}_{height or 'video'}.mp4")
 
                 video_variants.append({
                     "quality": q_label,
-                    "height": height or 0,
-                    "bitrate": tbr or 0,
-                    "bitrate_str": bitrate_str,
+                    "height": height or (9999 if acodec != 'none' and vcodec == 'none' else 0),
+                    "bitrate": int(tbr) if tbr else 0,
+                    "bitrate_str": f"{int(tbr)} kbps" if tbr else "--",
                     "size_str": size_str,
                     "raw_size": filesize or 0,
                     "url": furl,
-                    "filename": clean_fn
+                    "filename": clean_fn,
+                    "http_headers": info.get('http_headers') or {}
                 })
 
             video_variants.sort(key=lambda x: (x["height"], x["bitrate"]), reverse=True)
+            if not video_variants:
+                raise ValueError("未能提取到有效清晰度视频流！")
+
+            plat_label = override_label or f"🎬 {info.get('extractor_key') or '网络视频'}"
             return {
-                "tweet_id": tweet_id or str(info.get('id')),
+                "platform": "universal",
+                "platform_label": plat_label,
+                "media_id": str(info.get('id')),
                 "author": uploader,
                 "author_id": f"@{uploader_id}" if uploader_id else "",
                 "text": title.strip(),
                 "date": upload_date,
-                "duration": info.get('duration_string') or "--",
+                "duration": dur_str,
                 "thumbnail": thumbnail,
                 "variants": video_variants
             }
 
-    @classmethod
-    def _resolve_via_syndication(cls, tweet_id: str, proxy: Optional[str]) -> Optional[Dict[str, Any]]:
-        api_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&lang=en"
-        proxies = {"http": proxy, "https": proxy} if proxy else None
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json"
-        }
-        resp = requests.get(api_url, headers=headers, proxies=proxies, timeout=10)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        user = data.get("user", {})
-        author = user.get("name", "Twitter 用户")
-        author_id = f"@{user.get('screen_name', '')}"
-        text = data.get("text", "")
-        raw_created = data.get("created_at")
-        pub_date = raw_created[:16].replace("T", " ") if raw_created else datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        media_list = data.get("mediaDetails", [])
-        variants_list = []
-        for m in media_list:
-            v_info = m.get("video_info", {})
-            for var in v_info.get("variants", []):
-                if var.get("content_type") == "video/mp4":
-                    br = var.get("bitrate", 0)
-                    furl = var.get("url")
-                    m_res = re.search(r'/(\d+)x(\d+)/', furl)
-                    if m_res:
-                        w, h = int(m_res.group(1)), int(m_res.group(2))
-                        h_min = min(w, h)
-                        q_label = f"🎬 {h_min}P 高清 ({w}x{h})"
-                    else:
-                        q_label = f"🎬 MP4 视频 ({br // 1000} kbps)"
-                    
-                    clean_fn = f"twitter_{user.get('screen_name', 'video')}_{tweet_id}_{br}.mp4"
-                    variants_list.append({
-                        "quality": q_label,
-                        "height": br,
-                        "bitrate": br // 1000,
-                        "bitrate_str": f"{br // 1000} kbps",
-                        "size_str": "--",
-                        "raw_size": 0,
-                        "url": furl,
-                        "filename": clean_fn
-                    })
-
-        syn_thumb = media_list[0].get("media_url_https") if media_list else None
-        variants_list.sort(key=lambda x: x["bitrate"], reverse=True)
-        if variants_list:
-            return {
-                "tweet_id": tweet_id,
-                "author": author,
-                "author_id": author_id,
-                "text": text,
-                "date": pub_date,
-                "duration": "--",
-                "thumbnail": syn_thumb,
-                "variants": variants_list
-            }
-        return None
+# Backward compatibility alias
+TwitterMediaResolver = UniversalMediaResolver
 
 
 # Modern Professional Color Palette
