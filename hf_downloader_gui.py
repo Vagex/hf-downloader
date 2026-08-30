@@ -2307,7 +2307,9 @@ import re
 DEFAULT_PUBLIC_TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://open.tracker.cl:1337/announce",
-    "udp://9.rarbg.to:2920/announce",
+    "udp://opentracker.i2p.rocks:6969/announce",
+    "udp://tracker.openbittorrent.com:6969/announce",
+    "http://tracker.openbittorrent.com:80/announce",
     "udp://tracker.torrent.eu.org:451/announce",
     "udp://open.stealth.si:80/announce",
     "udp://tracker.moeking.me:6969/announce",
@@ -2315,8 +2317,14 @@ DEFAULT_PUBLIC_TRACKERS = [
     "udp://exodus.desync.com:6969/announce",
     "udp://tracker.dler.org:6969/announce",
     "udp://ipv4.tracker.harry.lu:80/announce",
-    "http://tracker.openbittorrent.com:80/announce",
-    "udp://tracker.bittor.pw:1337/announce"
+    "udp://bt1.archive.org:6969/announce",
+    "udp://bt2.archive.org:6969/announce",
+    "udp://tracker.theoks.net:6969/announce",
+    "udp://tracker.altrosky.nl:6969/announce",
+    "udp://p4p.arenabg.com:1337/announce",
+    "udp://movies.zsw.ca:6969/announce",
+    "udp://retracker.lanta.me:2710/announce",
+    "udp://tracker.cyberia.is:6969/announce"
 ]
 
 class MagnetResolver:
@@ -2358,14 +2366,9 @@ class MagnetResolver:
         existing_tr = query_params.get("tr", [])
         all_trackers = list(dict.fromkeys(existing_tr + DEFAULT_PUBLIC_TRACKERS))
 
-        enhanced_params = [
-            ("xt", f"urn:btih:{info_hash}"),
-            ("dn", display_name)
-        ]
+        enhanced_magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(display_name)}"
         for tr in all_trackers:
-            enhanced_params.append(("tr", tr))
-        
-        enhanced_magnet = "magnet:?" + urllib.parse.urlencode(enhanced_params, doseq=True)
+            enhanced_magnet += f"&tr={urllib.parse.quote(tr, safe='/:')}"
 
         return {
             "info_hash": info_hash,
@@ -2411,7 +2414,6 @@ class Aria2Manager:
         if exe:
             return exe
 
-        # Auto-download portable static aria2c.exe for Windows
         dest_dir = os.path.join(os.path.expanduser("~"), ".hf_downloader", "bin")
         os.makedirs(dest_dir, exist_ok=True)
         dest_exe = os.path.join(dest_dir, "aria2c.exe")
@@ -2423,7 +2425,6 @@ class Aria2Manager:
         if log_callback:
             log_callback("⏳ 首次使用磁力下载，正在自动准备高速绿色版 Aria2 引擎...")
 
-        # Official static win64 release with multiple accelerator mirrors
         download_urls = [
             "https://ghfast.top/https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
             "https://mirror.ghproxy.com/https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
@@ -2455,7 +2456,7 @@ class Aria2Manager:
                             log_callback("✓ 高速绿色版 Aria2 引擎已就绪！")
                         cls._cached_exe = dest_exe
                         return dest_exe
-            except Exception as e:
+            except Exception:
                 continue
 
         if os.path.exists(temp_zip):
@@ -2471,15 +2472,21 @@ class Aria2Manager:
         exe = cls.ensure_executable(log_callback=log_callback)
         os.makedirs(dest_dir, exist_ok=True)
 
+        tracker_arg = f"--bt-tracker={','.join(DEFAULT_PUBLIC_TRACKERS)}"
         cmd = [
             exe,
             enhanced_magnet,
+            tracker_arg,
             f"--dir={dest_dir}",
+            "--dht-entry-point=router.bittorrent.com:6881",
+            "--dht-entry-point=dht.transmissionbt.com:6881",
+            "--dht-entry-point=router.utorrent.com:6881",
             "--enable-dht=true",
+            "--enable-dht6=false",
             "--dht-listen-port=6881-6999",
             "--enable-peer-exchange=true",
             "--bt-enable-lpd=true",
-            "--bt-max-peers=120",
+            "--bt-max-peers=150",
             "--bt-request-peer-speed-limit=100M",
             "--max-connection-per-server=16",
             "--seed-time=0",
@@ -2489,6 +2496,9 @@ class Aria2Manager:
         ]
         if proxy:
             cmd.append(f"--all-proxy={proxy}")
+
+        if log_callback:
+            log_callback(f"[*] 启动 P2P/DHT 寻道网络，已注入 {len(DEFAULT_PUBLIC_TRACKERS)} 个顶级公共 Trackers 节点...")
 
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         proc = subprocess.Popen(
@@ -2507,6 +2517,7 @@ class Aria2Manager:
         )
 
         last_update = 0.0
+        last_log_t = time.time()
         success = False
 
         try:
@@ -2521,21 +2532,34 @@ class Aria2Manager:
 
                 if "Download complete" in line_s or "download completed" in line_s.lower():
                     success = True
+                    if log_callback:
+                        log_callback("[✓] 磁力资源 P2P 数据传输全部完成！")
 
                 m = prog_pattern.search(line_s)
                 if m:
                     cur_sz, tot_sz, pct, cn, sd, dl, eta = m.groups()
                     now = time.time()
+                    pct_val = float(pct) if pct else 0.0
+                    speed_str = dl if "/s" in dl else f"{dl}/s"
+                    peer_info = f"节点: {cn} | 种子: {sd or 0}"
+                    eta_str = eta or "--"
+
+                    # Output periodic live handshake log every 3 seconds
+                    if now - last_log_t >= 3.0:
+                        last_log_t = now
+                        if pct_val > 0.0:
+                            if log_callback:
+                                log_callback(f"     [P2P传输中] 进度: {pct_val:.1f}% ({cur_sz}/{tot_sz}) | 速度: {speed_str} | {peer_info} | 预估: {eta_str}")
+                        else:
+                            if log_callback:
+                                log_callback(f"     [🧲 P2P寻道] 正在与 {cn} 个活跃节点建立连接，交换种子元数据并准备高速下载...")
+
                     if now - last_update >= 0.3:
                         last_update = now
-                        pct_val = float(pct) if pct else 0.0
-                        speed_str = dl if "/s" in dl else f"{dl}/s"
-                        peer_info = f"连接: {cn} | 种子: {sd or 0}"
-                        eta_str = eta or "--"
                         if task:
                             task.progress = pct_val
                             task.speed_str = speed_str
-                            task.eta_str = eta_str
+                            task.eta_str = f"{peer_info} | {eta_str}"
                         if update_ui_callback:
                             update_ui_callback(pct_val, cur_sz, tot_sz, speed_str, eta_str, peer_info)
 
@@ -2552,7 +2576,6 @@ class Aria2Manager:
         if success and task:
             task.progress = 100.0
         return success
-
 
 class UniversalMediaResolver:
     """High-reliability multi-platform universal media parser for Bilibili, WeChat, Twitter/X, and 1000+ sites."""
