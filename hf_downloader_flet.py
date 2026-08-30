@@ -237,6 +237,49 @@ class UniversalMediaResolver:
         return "universal"
 
     @classmethod
+    def sanitize_filename(cls, name: str, max_len: int = 50) -> str:
+        """Sanitize string for valid and readable OS filenames across Windows, macOS and Linux."""
+        if not name:
+            return "video"
+        name = re.sub(r'<[^>]+>', '', str(name))
+        cleaned = re.sub(r'[\\/*?:"<>|\r\n\t]', '_', name)
+        cleaned = re.sub(r'[\s_]+', '_', cleaned).strip(' ._')
+        if len(cleaned) > max_len:
+            cleaned = cleaned[:max_len].rstrip(' ._')
+        return cleaned or "video"
+
+    @classmethod
+    def build_media_filename(cls, platform: str, title: str, author: str = "", quality_tag: str = "", media_id: str = "", ext: str = "mp4") -> str:
+        """Build an informative, clean, and intuitive filename across video platforms."""
+        plat_tags = {
+            "bilibili": "[B站]",
+            "wechat_article": "[微信]",
+            "wechat_channels": "[微信视频号]",
+            "twitter": "[Twitter]",
+            "youtube": "[YouTube]",
+            "douyin": "[抖音]",
+            "kuaishou": "[快手]",
+            "universal": "[网络视频]"
+        }
+        tag = plat_tags.get(platform.lower(), f"[{platform.capitalize()}]")
+        safe_title = cls.sanitize_filename(title or "视频", max_len=45)
+        safe_author = cls.sanitize_filename(author or "", max_len=20)
+        safe_q = cls.sanitize_filename(quality_tag or "", max_len=15)
+        safe_id = cls.sanitize_filename(media_id or "", max_len=20)
+
+        parts = [tag + safe_title]
+        if safe_author:
+            parts.append(safe_author)
+        if safe_q:
+            parts.append(safe_q)
+        if safe_id and safe_id not in (safe_title, safe_author):
+            parts.append(safe_id)
+
+        base_name = "_".join(parts)
+        ext_clean = ext.lstrip(".")
+        return f"{base_name}.{ext_clean}"
+
+    @classmethod
     def resolve(cls, raw_input: str, proxy: Optional[str] = None) -> Dict[str, Any]:
         if not raw_input or not raw_input.strip():
             raise ValueError("请输入有效的视频链接或推文/视频 ID！")
@@ -308,7 +351,7 @@ class UniversalMediaResolver:
                                     v_stream_url = d.get("url")
                                     v_size = d.get("size", 0)
                                     v_sz_str = f"{v_size / (1024*1024):.2f} MB" if v_size else "--"
-                                    clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"bilibili_{author}_{bvid}.mp4")
+                                    clean_fn = cls.build_media_filename("bilibili", title=title, author=author, quality_tag="1080P", media_id=bvid)
                                     variants_list.append({
                                         "quality": "🎬 1080P/720P 高清 (B站官方原生流)",
                                         "height": 1080,
@@ -390,7 +433,7 @@ class UniversalMediaResolver:
                             dur_str = f"{int(dur_sec//60)}:{int(dur_sec%60):02d}"
                         
                         sz_str = f"{filesize/(1024*1024):.2f} MB" if filesize else "--"
-                        clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"wechat_{author}_{vid}_{f_fmt}.mp4")
+                        clean_fn = cls.build_media_filename("wechat_article", title=title, author=author, quality_tag=f_fmt, media_id=vid)
 
                         variants_list.append({
                             "quality": f"🎬 {f_fmt} (微信原生直链)",
@@ -484,10 +527,10 @@ class UniversalMediaResolver:
                                     w, h = int(m_res.group(1)), int(m_res.group(2))
                                     h_min = min(w, h)
                                     q_label = f"🎬 {h_min}P 超清 ({w}x{h})" if h_min >= 1080 else f"🎬 {h_min}P 高清 ({w}x{h})"
-                                    clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}_{w}x{h}.mp4"
+                                    clean_fn = cls.build_media_filename("twitter", title=text or f"推文视频_{tweet_id}", author=screen_name or author, quality_tag=f"{h_min}P", media_id=tweet_id)
                                 else:
                                     q_label = f"🎬 MP4 视频 ({br // 1000} kbps)" if br else "🎬 标准 MP4 视频"
-                                    clean_fn = f"twitter_{screen_name or 'video'}_{tweet_id}_{br}.mp4"
+                                    clean_fn = cls.build_media_filename("twitter", title=text or f"推文视频_{tweet_id}", author=screen_name or author, quality_tag=f"{br//1000}k" if br else "标准", media_id=tweet_id)
 
                                 est_size = f"{(br / 8 * dur_sec) / (1024*1024):.2f} MB" if (br and dur_sec) else "--"
                                 variants_list.append({
@@ -603,7 +646,10 @@ class UniversalMediaResolver:
                     est = (tbr * 1000 / 8) * duration_sec
                     size_str = f"~{est / (1024*1024):.1f} MB"
 
-                clean_fn = re.sub(r'[\\/*?:"<>|]', '_', f"{uploader_id or 'media'}_{info.get('id') or 'video'}_{height or 'video'}.mp4")
+                ext = "m4a" if (acodec != 'none' and vcodec == 'none') else "mp4"
+                q_tag = "音频" if ext == "m4a" else (f"{height}P" if height else "MP4")
+                plat_key = str(info.get('extractor_key') or 'universal').lower()
+                clean_fn = cls.build_media_filename(plat_key, title=title, author=uploader, quality_tag=q_tag, media_id=str(info.get('id') or '')[:16], ext=ext)
 
                 video_variants.append({
                     "quality": q_label,
