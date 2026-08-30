@@ -1204,24 +1204,34 @@ class PresetDirectoryManagerDialog(tk.Toplevel):
 # ------------------ Twitter Video & Thumbnail Visual Preview Dialog ------------------
 # ------------------ Universal Video & Thumbnail Visual Preview Dialog ------------------
 class MediaPreviewDialog(tk.Toplevel):
-    """Visual Dialog for previewing video thumbnail and streaming the MP4 video directly for Bilibili, WeChat, Twitter, and Web videos."""
+    """Visual Dialog for previewing video thumbnail and streaming the MP4 video directly (prioritizing local downloaded files to save bandwidth)."""
 
-    def __init__(self, parent, media_data: Dict[str, Any], variant_index: int = 0, proxy: Optional[str] = None):
+    def __init__(self, parent, media_data: Dict[str, Any], variant_index: int = 0, proxy: Optional[str] = None, dest_dir: Optional[str] = None):
         super().__init__(parent)
         self.media_data = media_data
         self.proxy = proxy
+        self.dest_dir = dest_dir
         variants = media_data.get("variants", [])
         self.current_variant = variants[variant_index] if 0 <= variant_index < len(variants) else (variants[0] if variants else {})
         
+        # Check if file has already been downloaded to local disk
+        filename = self.current_variant.get("filename", "")
+        self.local_file_path = None
+        if self.dest_dir and filename:
+            candidate = os.path.normpath(os.path.join(self.dest_dir, filename))
+            if os.path.exists(candidate) and os.path.getsize(candidate) > 0:
+                self.local_file_path = candidate
+
         plat_label = media_data.get("platform_label", "流媒体视频")
-        self.title(f"🎬 {plat_label} 视频与封面在线预览 (Video & Thumbnail Preview)")
-        self.geometry("780x560")
+        loc_badge = " [🟢 本地已下载·0流量]" if self.local_file_path else " [🌐 远程网络流]"
+        self.title(f"🎬 {plat_label} 视频与封面在线预览{loc_badge}")
+        self.geometry("780x570")
         self.minsize(680, 480)
         self.transient(parent)
         self.grab_set()
 
         self.thumbnail_img = None
-        center_window_on_parent(self, parent, 780, 560)
+        center_window_on_parent(self, parent, 780, 570)
         self._build_ui()
         self._load_thumbnail_async()
 
@@ -1241,7 +1251,9 @@ class MediaPreviewDialog(tk.Toplevel):
         sz = self.current_variant.get("size_str", "--")
         br = self.current_variant.get("bitrate_str", "--")
 
-        lbl_title = ttk.Label(top_frame, text=f"[{plat_label}] 👤 {author} ({author_id})  |  {q_label}  |  文件大小: {sz} (码率: {br})", font=FONT_BOLD, foreground="#0d6efd")
+        title_color = "#198754" if self.local_file_path else "#0d6efd"
+        status_tag = " [🟢 本地已下载·0流量秒开]" if self.local_file_path else ""
+        lbl_title = ttk.Label(top_frame, text=f"[{plat_label}] 👤 {author} ({author_id})  |  {q_label}{status_tag}  |  大小: {sz}", font=FONT_BOLD, foreground=title_color)
         lbl_title.pack(anchor=tk.W, pady=(0, 2))
 
         lbl_sub = ttk.Label(top_frame, text=f"🕒 发布时间: {pub_date}  |  时长: {self.media_data.get('duration', '--')}", font=FONT_SMALL, foreground="#555555")
@@ -1261,29 +1273,40 @@ class MediaPreviewDialog(tk.Toplevel):
         self.lbl_image.pack(fill=tk.BOTH, expand=True)
         self.lbl_image.bind("<Double-1>", lambda e: self.play_with_system_player())
 
-        # 3. Direct URL Box
+        # 3. Direct URL / Local Path Box
         url_frame = ttk.Frame(main_frame)
         url_frame.pack(fill=tk.X, pady=(0, 6))
 
-        ttk.Label(url_frame, text="直链地址:").pack(side=tk.LEFT, padx=(0, 4))
+        lbl_url_title = "本地路径:" if self.local_file_path else "直链地址:"
+        ttk.Label(url_frame, text=lbl_url_title).pack(side=tk.LEFT, padx=(0, 4))
+        
         self.direct_url = self.current_variant.get("url", "")
+        display_path = self.local_file_path or self.direct_url
         entry_url = ttk.Entry(url_frame, font=FONT_NORMAL)
-        entry_url.insert(0, self.direct_url)
+        entry_url.insert(0, display_path)
         entry_url.config(state="readonly")
         entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
 
-        btn_copy_url = ttk.Button(url_frame, text="📋 复制直链", command=self._copy_url)
+        copy_btn_text = "📋 复制本地路径" if self.local_file_path else "📋 复制直链"
+        btn_copy_url = ttk.Button(url_frame, text=copy_btn_text, command=self._copy_url)
         btn_copy_url.pack(side=tk.RIGHT)
 
         # 4. Action Buttons Toolbar
         action_bar = ttk.Frame(main_frame)
         action_bar.pack(fill=tk.X)
 
+        if self.local_file_path:
+            btn_play_text = "▶️ 立即播放本地视频 (0 流量秒开)"
+            btn_play_bg = "#198754"
+        else:
+            btn_play_text = "▶️ 立即在线播放视频 (远程网络流)"
+            btn_play_bg = "#0d6efd"
+
         btn_play_system = tk.Button(
             action_bar,
-            text="▶️ 立即在线播放视频 (调用系统播放器)",
+            text=btn_play_text,
             font=FONT_BOLD,
-            bg="#198754",
+            bg=btn_play_bg,
             fg="#ffffff",
             activebackground="#157347",
             activeforeground="#ffffff",
@@ -1292,45 +1315,57 @@ class MediaPreviewDialog(tk.Toplevel):
         )
         btn_play_system.pack(side=tk.LEFT, padx=(0, 6))
 
-        btn_play_browser = tk.Button(
-            action_bar,
-            text="🌐 在浏览器中在线播放",
-            font=FONT_BOLD,
-            bg="#0d6efd",
-            fg="#ffffff",
-            activebackground="#0b5ed7",
-            activeforeground="#ffffff",
-            padx=10, pady=4,
-            command=self.open_in_browser
-        )
-        btn_play_browser.pack(side=tk.LEFT, padx=4)
+        if not self.local_file_path:
+            btn_play_browser = tk.Button(
+                action_bar,
+                text="🌐 在浏览器中在线播放",
+                font=FONT_BOLD,
+                bg="#6c757d",
+                fg="#ffffff",
+                activebackground="#5c636a",
+                activeforeground="#ffffff",
+                padx=10, pady=4,
+                command=self.open_in_browser
+            )
+            btn_play_browser.pack(side=tk.LEFT, padx=4)
+        else:
+            btn_open_loc = ttk.Button(
+                action_bar,
+                text="📂 打开本地文件所在文件夹",
+                command=lambda: os.startfile(os.path.dirname(self.local_file_path)) if sys.platform == "win32" else None
+            )
+            btn_open_loc.pack(side=tk.LEFT, padx=4)
 
         btn_close = ttk.Button(action_bar, text="关闭预览", command=self.destroy)
         btn_close.pack(side=tk.RIGHT)
 
     def _copy_url(self):
-        if self.direct_url:
+        target = self.local_file_path or self.direct_url
+        if target:
             self.clipboard_clear()
-            self.clipboard_append(self.direct_url)
-            messagebox.showinfo("复制成功", "已将视频播放直链复制到剪贴板！", parent=self)
+            self.clipboard_append(target)
+            msg = "已将本地文件路径复制到剪贴板！" if self.local_file_path else "已将视频播放直链复制到剪贴板！"
+            messagebox.showinfo("复制成功", msg, parent=self)
 
     def play_with_system_player(self):
-        if not self.direct_url:
+        target = self.local_file_path or self.direct_url
+        if not target:
             return
         import webbrowser
         try:
             if sys.platform == "win32":
-                os.startfile(self.direct_url)
+                os.startfile(target)
             else:
-                webbrowser.open(self.direct_url)
+                webbrowser.open(target)
         except Exception:
-            webbrowser.open(self.direct_url)
+            webbrowser.open(target)
 
     def open_in_browser(self):
-        if not self.direct_url:
+        target = self.local_file_path or self.direct_url
+        if not target:
             return
         import webbrowser
-        webbrowser.open(self.direct_url)
+        webbrowser.open(target)
 
     def _load_thumbnail_async(self):
         thumb_url = self.media_data.get("thumbnail")
@@ -4197,7 +4232,7 @@ class HFDownloaderApp(tk.Tk):
 
     def preview_twitter_video(self):
         if not self.tw_resolved_data or not self.tw_resolved_data.get("variants"):
-            messagebox.showwarning("提示", "请先解析有效的推文视频后再查看效果！", parent=self)
+            messagebox.showwarning("提示", "请先解析有效的视频后再查看效果！", parent=self)
             return
 
         sel = self.tree_tw_variants.selection()
@@ -4205,7 +4240,13 @@ class HFDownloaderApp(tk.Tk):
         if sel and sel[0].isdigit():
             idx = int(sel[0])
 
-        TwitterPreviewDialog(self, self.tw_resolved_data, variant_index=idx, proxy=self._get_effective_proxy())
+        MediaPreviewDialog(
+            self, 
+            self.tw_resolved_data, 
+            variant_index=idx, 
+            proxy=self._get_effective_proxy(),
+            dest_dir=self.tw_dest_path_var.get().strip()
+        )
 
     def _show_tw_context_menu(self, event):
         if not self.tw_resolved_data:
@@ -4218,11 +4259,21 @@ class HFDownloaderApp(tk.Tk):
             if 0 <= idx < len(variants):
                 v = variants[idx]
                 v_url = v.get("url", "")
+                v_name = v.get("filename", "")
+                dest_dir = self.tw_dest_path_var.get().strip()
+                local_path = os.path.normpath(os.path.join(dest_dir, v_name)) if (dest_dir and v_name) else ""
+                has_local = bool(local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0)
 
                 menu = tk.Menu(self, tearoff=0)
-                menu.add_command(label="🎬 在线预览播放该画质视频", command=self.preview_twitter_video)
-                menu.add_command(label="🌐 在浏览器中打开播放直链", command=lambda: os.startfile(v_url) if sys.platform == "win32" else None)
-                menu.add_command(label="📋 复制该画质下载直链", command=lambda: (self.clipboard_clear(), self.clipboard_append(v_url), messagebox.showinfo("提示", "已复制直链到剪贴板！", parent=self)))
+                if has_local:
+                    menu.add_command(label="▶️ 播放本地已下载视频 (0 流量秒开)", command=lambda: os.startfile(local_path) if sys.platform == "win32" else None)
+                    menu.add_command(label="🎬 详细预览与封面信息 (包含本地信息)", command=self.preview_twitter_video)
+                    menu.add_command(label="📂 打开本地文件所在文件夹", command=lambda: os.startfile(os.path.dirname(local_path)) if sys.platform == "win32" else None)
+                else:
+                    menu.add_command(label="🎬 在线预览播放 (远程流)", command=self.preview_twitter_video)
+                    menu.add_command(label="🌐 在浏览器中打开播放直链", command=lambda: os.startfile(v_url) if sys.platform == "win32" else None)
+                
+                menu.add_command(label="📋 复制下载直链", command=lambda: (self.clipboard_clear(), self.clipboard_append(v_url), messagebox.showinfo("提示", "已复制直链到剪贴板！", parent=self)))
                 menu.add_separator()
                 menu.add_command(label="📥 将当前规格加入统一下载队列", command=lambda: self.add_twitter_to_queue(jump=False))
                 menu.post(event.x_root, event.y_root)

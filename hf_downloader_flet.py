@@ -3051,26 +3051,42 @@ def main(page: ft.Page):
             checked_tw_indices.add(idx)
             add_tw_to_queue(jump=True)
 
+        dest_dir = (txt_tw_dest.value or "").strip()
         for idx, v in enumerate(variants):
             is_chk = idx in checked_tw_indices
+            v_name = v.get("filename", "")
+            loc_path = os.path.normpath(os.path.join(dest_dir, v_name)) if (dest_dir and v_name) else ""
+            has_local = bool(loc_path and os.path.exists(loc_path) and os.path.getsize(loc_path) > 0)
+
+            def make_play_handler(local_p, remote_u, is_loc):
+                def _play(e):
+                    if is_loc and sys.platform == "win32":
+                        try:
+                            os.startfile(local_p)
+                            return
+                        except:
+                            pass
+                    page.launch_url(local_p if is_loc else remote_u)
+                return _play
+
             col_tw_variants.controls.append(
                 ft.Container(
                     content=ft.Row([
                         ft.Checkbox(value=is_chk, on_change=make_chk_handler(idx), scale=0.85),
                         ft.Row([
-                            ft.Icon(ft.Icons.SMART_DISPLAY, size=18, color=COLOR_ACCENT if is_chk else COLOR_WARNING),
-                            ft.Text(v["quality"], size=13, weight=ft.FontWeight.BOLD if is_chk else ft.FontWeight.NORMAL)
-                        ], width=220),
-                        ft.Text(v["bitrate_str"], width=110, text_align=ft.TextAlign.CENTER, size=12),
-                        ft.Text(v["size_str"], width=110, text_align=ft.TextAlign.CENTER, size=12, color=COLOR_SUCCESS, weight=ft.FontWeight.BOLD),
+                            ft.Icon(ft.Icons.CHECK_CIRCLE if has_local else ft.Icons.SMART_DISPLAY, size=18, color=COLOR_SUCCESS if has_local else (COLOR_ACCENT if is_chk else COLOR_WARNING)),
+                            ft.Text(v["quality"] + (" [已下载]" if has_local else ""), size=13, weight=ft.FontWeight.BOLD if (is_chk or has_local) else ft.FontWeight.NORMAL, color=COLOR_SUCCESS if has_local else None)
+                        ], width=230),
+                        ft.Text(v["bitrate_str"], width=100, text_align=ft.TextAlign.CENTER, size=12),
+                        ft.Text(v["size_str"], width=100, text_align=ft.TextAlign.CENTER, size=12, color=COLOR_SUCCESS, weight=ft.FontWeight.BOLD),
                         ft.Text(v["filename"], expand=True, size=12),
                         ft.Row([
                             ft.IconButton(
                                 icon=ft.Icons.PLAY_CIRCLE_FILL,
-                                icon_color=COLOR_ACCENT,
+                                icon_color=COLOR_SUCCESS if has_local else COLOR_ACCENT,
                                 icon_size=18,
-                                tooltip="在线预览播放视频",
-                                on_click=lambda e, u=v["url"]: page.launch_url(u)
+                                tooltip="▶️ 播放本地已下载视频 (0 流量秒开)" if has_local else "🌐 在线预览播放视频 (远程网络流)",
+                                on_click=make_play_handler(loc_path, v["url"], has_local)
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.DOWNLOAD,
