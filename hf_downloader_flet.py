@@ -471,12 +471,152 @@ class Aria2Manager:
         return success
 
 
+# ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
+class QuarkPanResolver:
+    """Intelligent Quark Cloud Drive (pan.quark.cn) share parser and direct download link generator."""
+
+    BASE_URL = "https://drive-pc.quark.cn/1/clouddrive"
+
+    @staticmethod
+    def is_quark_link(url: str) -> bool:
+        if not url:
+            return False
+        return "pan.quark.cn/s/" in url or "quark.cn/s/" in url
+
+    @staticmethod
+    def extract_pwd_and_passcode(raw_input: str) -> tuple:
+        m_pwd = re.search(r'pan\.quark\.cn/s/([a-zA-Z0-9]+)', raw_input)
+        if not m_pwd:
+            m_pwd = re.search(r'quark\.cn/s/([a-zA-Z0-9]+)', raw_input)
+        pwd_id = m_pwd.group(1) if m_pwd else ""
+
+        m_code = re.search(r'(?:提取码|密码|code|pwd)[:：\s=]*([a-zA-Z0-9]{4,6})', raw_input, re.IGNORECASE)
+        passcode = m_code.group(1) if m_code else ""
+
+        return pwd_id, passcode
+
+    @classmethod
+    def resolve_share(cls, raw_input: str, proxy: Optional[str] = None, cookie: Optional[str] = None) -> Dict[str, Any]:
+        pwd_id, passcode = cls.extract_pwd_and_passcode(raw_input)
+        if not pwd_id:
+            raise ValueError("未能识别到有效的夸克网盘分享链接 (https://pan.quark.cn/s/...)！")
+
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 QuarkPC/2.5.0",
+            "Referer": f"https://pan.quark.cn/s/{pwd_id}",
+            "Origin": "https://pan.quark.cn",
+            "Content-Type": "application/json;charset=UTF-8"
+        }
+        if cookie:
+            headers["Cookie"] = cookie
+
+        # Step 1: Get share_token
+        token_url = f"{cls.BASE_URL}/share/sharepage/token"
+        token_payload = {
+            "pwd_id": pwd_id,
+            "passcode": passcode
+        }
+
+        r_tok = requests.post(token_url, json=token_payload, headers=headers, proxies=proxies, timeout=12)
+        if r_tok.status_code != 200:
+            raise ValueError(f"访问夸克网盘接口失败 (HTTP {r_tok.status_code})，请检查网络或代理！")
+
+        tok_data = r_tok.json()
+        if tok_data.get("code") != 0 and tok_data.get("status") != 200:
+            err_msg = tok_data.get("message") or tok_data.get("msg") or "提取分享 Token 失败"
+            raise ValueError(f"夸克网盘提示: {err_msg} (如需提取码请在链接后附带 提取码:xxxx)")
+
+        share_token = tok_data.get("data", {}).get("share_token") or ""
+
+        # Step 2: Get share file list detail
+        detail_url = f"{cls.BASE_URL}/share/sharepage/detail"
+        params = {
+            "pwd_id": pwd_id,
+            "stoken": share_token,
+            "pdir_fid": "0",
+            "_fetch_total": "1"
+        }
+
+        r_detail = requests.get(detail_url, params=params, headers=headers, proxies=proxies, timeout=12)
+        if r_detail.status_code != 200:
+            raise ValueError(f"获取夸克分享文件详情失败 (HTTP {r_detail.status_code})！")
+
+        detail_json = r_detail.json()
+        d_data = detail_json.get("data", {})
+        share_title = d_data.get("title") or "夸克网盘分享资源"
+        file_list = d_data.get("list", [])
+
+        if not file_list:
+            raise ValueError("该夸克网盘分享中暂无文件或已被分享者取消！")
+
+        variants = []
+        for f in file_list:
+            fname = f.get("file_name") or "未命名文件"
+            fid = f.get("fid") or ""
+            fsize = f.get("size") or 0
+            is_dir = f.get("file_type") == 0
+
+            sz_str = f"{fsize / (1024*1024):.2f} MB" if fsize >= 1024*1024 else (f"{fsize/1024:.1f} KB" if fsize else ("目录" if is_dir else "--"))
+            clean_fn = re.sub(r'[\\/*?:"<>|\r\n\t]', '_', f"[夸克]_{fname}")
+
+            down_api_url = f"{cls.BASE_URL}/share/sharepage/download"
+            down_url = ""
+            try:
+                r_dl = requests.post(down_api_url, json={
+                    "pwd_id": pwd_id,
+                    "stoken": share_token,
+                    "fids": [fid]
+                }, headers=headers, proxies=proxies, timeout=8)
+                if r_dl.status_code == 200:
+                    dl_json = r_dl.json()
+                    dl_data = dl_json.get("data", [])
+                    if dl_data and isinstance(dl_data, list):
+                        down_url = dl_data[0].get("download_url") or ""
+            except Exception:
+                pass
+
+            target_download_url = down_url or f"https://pan.quark.cn/s/{pwd_id}#fid={fid}"
+            ext_icon = "📁 " if is_dir else "📄 "
+            variants.append({
+                "quality": f"{ext_icon}{fname}",
+                "height": 1080 if not is_dir else 0,
+                "bitrate": 0,
+                "bitrate_str": "夸克高速直链" if down_url else "夸克网盘资源",
+                "size_str": sz_str,
+                "raw_size": fsize,
+                "url": target_download_url,
+                "filename": clean_fn,
+                "http_headers": {
+                    "User-Agent": headers["User-Agent"],
+                    "Referer": "https://pan.quark.cn/"
+                },
+                "source_url": f"https://pan.quark.cn/s/{pwd_id}",
+                "format_id": fid
+            })
+
+        return {
+            "platform": "quark",
+            "platform_label": "📁 夸克网盘 (Quark Pan)",
+            "media_id": pwd_id,
+            "author": "夸克网盘分享",
+            "author_id": f"分享ID: {pwd_id}",
+            "text": share_title,
+            "date": d_data.get("created_at") or "",
+            "duration": f"共 {len(variants)} 个文件/目录",
+            "thumbnail": None,
+            "variants": variants
+        }
+
+
 class UniversalMediaResolver:
     """High-reliability multi-platform universal media parser for Bilibili, WeChat, Twitter/X, and 1000+ sites."""
 
     @staticmethod
     def detect_platform(raw_input: str) -> str:
         s = raw_input.strip().lower()
+        if QuarkPanResolver.is_quark_link(raw_input):
+            return "quark"
         if MagnetResolver.is_magnet_link(raw_input):
             return "magnet"
         if "bilibili.com" in s or "b23.tv" in s or re.search(r'\b(bv[a-za-z0-9]{10}|av\d+)\b', s):
@@ -539,7 +679,9 @@ class UniversalMediaResolver:
         raw_input = raw_input.strip()
         platform = cls.detect_platform(raw_input)
 
-        if platform == "magnet":
+        if platform == "quark":
+            return QuarkPanResolver.resolve_share(raw_input, proxy)
+        elif platform == "magnet":
             return cls._resolve_magnet(raw_input, proxy)
         elif platform == "bilibili":
             return cls._resolve_bilibili(raw_input, proxy)
