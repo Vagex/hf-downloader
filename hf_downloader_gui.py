@@ -2556,8 +2556,9 @@ class Aria2Manager:
 
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 # ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
+# ------------------ Intelligent Quark Cloud Drive (pan.quark.cn) Resolver ------------------
 class QuarkPanResolver:
-    """Intelligent Quark Cloud Drive (pan.quark.cn) share parser and direct download link generator."""
+    """Intelligent Quark Cloud Drive (pan.quark.cn) share parser with recursive sub-folder expansion."""
 
     BASE_URLS = [
         "https://drive.quark.cn/1/clouddrive",
@@ -2600,8 +2601,9 @@ class QuarkPanResolver:
         if cookie:
             headers["Cookie"] = cookie
 
-        # Step 1: Request share_token with multi-endpoint failover and detailed error diagnostics
+        # Step 1: Request share_token
         share_token = ""
+        share_title = "夸克网盘分享资源"
         last_err = ""
         for base in cls.BASE_URLS:
             try:
@@ -2612,7 +2614,11 @@ class QuarkPanResolver:
                 msg = tok_data.get("message") or tok_data.get("msg") or ""
 
                 if code == 0 or tok_data.get("status") == 200:
-                    share_token = tok_data.get("data", {}).get("share_token") or ""
+                    d_info = tok_data.get("data", {})
+                    # CRITICAL: Quark API returns 'stoken'
+                    share_token = d_info.get("stoken") or d_info.get("share_token") or ""
+                    if d_info.get("title"):
+                        share_title = d_info.get("title")
                     if share_token:
                         break
                 elif code == 41006 or r_tok.status_code == 404:
@@ -2633,76 +2639,80 @@ class QuarkPanResolver:
             err = last_err or "获取分享 Token 失败，可能是链接失效或需要提取码"
             raise ValueError(f"夸克网盘提示: {err} (若需提取码请在链接后输入 提取码:xxxx)")
 
-        # Step 2: Request share file list detail
-        detail_json = None
-        for base in cls.BASE_URLS:
-            try:
-                detail_url = f"{base}/share/sharepage/detail"
-                params = {
-                    "pwd_id": pwd_id,
-                    "stoken": share_token,
-                    "pdir_fid": "0",
-                    "force": "0",
-                    "_page": "1",
-                    "_size": "50",
-                    "_fetch_total": "1",
-                    "_sort": "file_type:asc,updated_at:desc"
-                }
-                r_detail = requests.get(detail_url, params=params, headers=headers, proxies=proxies, timeout=10)
-                if r_detail.status_code == 200:
-                    dj = r_detail.json()
-                    if dj.get("code") == 0:
-                        detail_json = dj
-                        break
-            except Exception:
+        # Step 2: Recursively fetch all files across sub-folders
+        all_files = []
+        folder_queue = [("0", "")]
+        visited_fids = set()
+
+        while folder_queue and len(all_files) < 200:
+            cur_pdir_fid, cur_prefix = folder_queue.pop(0)
+            if cur_pdir_fid in visited_fids:
                 continue
+            visited_fids.add(cur_pdir_fid)
 
-        if not detail_json:
-            raise ValueError("获取夸克分享文件列表失败，可能是由于网络连接波动或该分享受限，请稍后重试！")
-
-        d_data = detail_json.get("data", {})
-        share_title = d_data.get("title") or "夸克网盘分享资源"
-        file_list = d_data.get("list", [])
-
-        if not file_list:
-            raise ValueError("该夸克网盘分享中暂无文件或已被分享者清空！")
-
-        variants = []
-        for f in file_list:
-            fname = f.get("file_name") or "未命名文件"
-            fid = f.get("fid") or ""
-            fsize = f.get("size") or 0
-            is_dir = f.get("file_type") == 0
-
-            sz_str = f"{fsize / (1024*1024):.2f} MB" if fsize >= 1024*1024 else (f"{fsize/1024:.1f} KB" if fsize else ("目录" if is_dir else "--"))
-            clean_fn = re.sub(r'[\\/*?:"<>|\r\n\t]', '_', f"[夸克]_{fname}")
-
-            down_url = ""
+            detail_json = None
             for base in cls.BASE_URLS:
                 try:
-                    down_api_url = f"{base}/share/sharepage/download"
-                    r_dl = requests.post(down_api_url, json={
+                    detail_url = f"{base}/share/sharepage/detail"
+                    params = {
                         "pwd_id": pwd_id,
                         "stoken": share_token,
-                        "fids": [fid]
-                    }, headers=headers, proxies=proxies, timeout=8)
-                    if r_dl.status_code == 200:
-                        dl_json = r_dl.json()
-                        dl_data = dl_json.get("data", [])
-                        if dl_data and isinstance(dl_data, list):
-                            down_url = dl_data[0].get("download_url") or ""
-                            if down_url:
-                                break
+                        "pdir_fid": cur_pdir_fid,
+                        "force": "0",
+                        "_page": "1",
+                        "_size": "100",
+                        "_fetch_total": "1",
+                        "_sort": "file_type:asc,updated_at:desc"
+                    }
+                    r_detail = requests.get(detail_url, params=params, headers=headers, proxies=proxies, timeout=10)
+                    if r_detail.status_code == 200:
+                        dj = r_detail.json()
+                        if dj.get("code") == 0:
+                            detail_json = dj
+                            break
                 except Exception:
                     continue
 
-            target_download_url = down_url or f"https://pan.quark.cn/s/{pwd_id}#fid={fid}"
-            ext_icon = "📁 " if is_dir else "📄 "
+            if not detail_json:
+                continue
+
+            d_data = detail_json.get("data", {})
+            if not share_title and d_data.get("title"):
+                share_title = d_data.get("title")
+
+            file_items = d_data.get("list", [])
+            for item in file_items:
+                f_type = item.get("file_type")
+                fid = item.get("fid")
+                fname = item.get("file_name") or "未命名文件"
+                if f_type == 0:
+                    sub_prefix = f"{cur_prefix}{fname}/" if cur_prefix else f"{fname}/"
+                    folder_queue.append((fid, sub_prefix))
+                else:
+                    item["rel_display_name"] = f"{cur_prefix}{fname}" if cur_prefix else fname
+                    all_files.append(item)
+
+        if not all_files:
+            raise ValueError("该夸克网盘分享中暂无可下载的文件或内容为空！")
+
+        variants = []
+        for f in all_files:
+            fname = f.get("file_name") or "未命名文件"
+            rel_name = f.get("rel_display_name") or fname
+            fid = f.get("fid") or ""
+            fsize = f.get("size") or 0
+
+            sz_str = f"{fsize / (1024*1024*1024):.2f} GB" if fsize >= 1024*1024*1024 else (
+                f"{fsize / (1024*1024):.2f} MB" if fsize >= 1024*1024 else f"{fsize/1024:.1f} KB"
+            )
+            clean_fn = re.sub(r'[\\/*?:"<>|\r\n\t]', '_', f"[夸克]_{fname}")
+            target_download_url = f"https://pan.quark.cn/s/{pwd_id}#fid={fid}"
+
             variants.append({
-                "quality": f"{ext_icon}{fname}",
-                "height": 1080 if not is_dir else 0,
+                "quality": f"📄 {rel_name}",
+                "height": 1080,
                 "bitrate": 0,
-                "bitrate_str": "夸克高速直链" if down_url else "夸克网盘资源",
+                "bitrate_str": "夸克高速资源",
                 "size_str": sz_str,
                 "raw_size": fsize,
                 "url": target_download_url,
@@ -2722,8 +2732,8 @@ class QuarkPanResolver:
             "author": "夸克网盘分享",
             "author_id": f"分享ID: {pwd_id}",
             "text": share_title,
-            "date": d_data.get("created_at") or "",
-            "duration": f"共 {len(variants)} 个文件/目录",
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "duration": f"共包含 {len(variants)} 个文件",
             "thumbnail": None,
             "variants": variants
         }
