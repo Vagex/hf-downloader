@@ -2998,13 +2998,15 @@ def main(page: ft.Page):
         k = dd_tw_preset.value
         if k in PRESET_DIRS_MAP:
             tf_tw_dest.value = PRESET_DIRS_MAP[k]
+            refresh_tw_variants_view()
             page.update()
 
     dd_tw_preset.on_change = on_tw_preset_change
+    tf_tw_dest.on_change = lambda e: refresh_tw_variants_view()
 
-    lbl_tw_author = ft.Text("推文作者: --", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT)
+    lbl_tw_author = ft.Text("平台与作者: --", weight=ft.FontWeight.BOLD, size=13, color=COLOR_ACCENT)
     lbl_tw_date = ft.Text("发布日期: -- | 视频时长: --", size=12, color=ft.Colors.GREY_600)
-    lbl_tw_text = ft.Text("推文内容: (请在上方面板输入推文链接并点击【开始解析视频】)", size=12)
+    lbl_tw_text = ft.Text("内容标题: (请在上方面板输入视频/推文/文章链接并点击【开始解析视频】)", size=12)
     lbl_tw_checked = ft.Text("[已勾选: 0 项规格]", weight=ft.FontWeight.BOLD, color=COLOR_SUCCESS, size=13)
     img_tw_thumb = ft.Image(src="", width=150, height=90, fit=ft.ImageFit.COVER, border_radius=ft.BorderRadius(6, 6, 6, 6), visible=False)
 
@@ -3051,12 +3053,17 @@ def main(page: ft.Page):
             checked_tw_indices.add(idx)
             add_tw_to_queue(jump=True)
 
-        dest_dir = (txt_tw_dest.value or "").strip()
+        dest_dir = (tf_tw_dest.value or "").strip()
         for idx, v in enumerate(variants):
             is_chk = idx in checked_tw_indices
             v_name = v.get("filename", "")
             loc_path = os.path.normpath(os.path.join(dest_dir, v_name)) if (dest_dir and v_name) else ""
             has_local = bool(loc_path and os.path.exists(loc_path) and os.path.getsize(loc_path) > 0)
+            if not has_local:
+                has_local = any(
+                    t.file_path == v_name and t.dest_dir == dest_dir and t.status == "已完成"
+                    for t in tasks
+                )
 
             def make_play_handler(local_p, remote_u, is_loc):
                 def _play(e):

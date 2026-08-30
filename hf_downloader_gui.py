@@ -4068,6 +4068,8 @@ class HFDownloaderApp(tk.Tk):
         self.tree_tw_variants.column("filename", width=420, minwidth=200, stretch=True, anchor=tk.W)
 
         self.tree_tw_variants.tag_configure("checked_tag", foreground="#198754", font=FONT_TABLE_BOLD)
+        self.tree_tw_variants.tag_configure("downloaded_tag", foreground="#198754", font=FONT_TABLE_BOLD)
+        self.tree_tw_variants.tag_configure("downloaded_checked_tag", foreground="#0d6efd", font=FONT_TABLE_BOLD)
         self.tree_tw_variants.tag_configure("file_tag", foreground="#212529", font=FONT_TABLE)
 
         tw_scroll_y = ttk.Scrollbar(tw_file_container, orient=tk.VERTICAL, command=self.tree_tw_variants.yview)
@@ -4113,6 +4115,8 @@ class HFDownloaderApp(tk.Tk):
         label = self.tw_preset_var.get()
         if label in PRESET_DIRS_MAP:
             self.tw_dest_path_var.set(PRESET_DIRS_MAP[label])
+            if self.tw_resolved_data:
+                self._populate_twitter_results()
 
     def browse_tw_dest_path(self):
         cur = self.tw_dest_path_var.get().strip()
@@ -4121,6 +4125,8 @@ class HFDownloaderApp(tk.Tk):
         if chosen:
             norm_dir = os.path.normpath(chosen)
             self.tw_dest_path_var.set(norm_dir)
+            if self.tw_resolved_data:
+                self._populate_twitter_results()
 
     def start_resolve_twitter(self):
         raw_url = self.tw_url_var.get().strip()
@@ -4183,17 +4189,38 @@ class HFDownloaderApp(tk.Tk):
         self.tree_tw_variants.delete(*self.tree_tw_variants.get_children())
         self.checked_tw_variants.clear()
 
+        dest_dir = self.tw_dest_path_var.get().strip()
         variants = data.get("variants", [])
         for idx, v in enumerate(variants):
-            is_default = (idx == 0) # Default check highest quality
+            v_name = v.get("filename", "")
+            local_p = os.path.normpath(os.path.join(dest_dir, v_name)) if (dest_dir and v_name) else ""
+            is_downloaded = bool(local_p and os.path.exists(local_p) and os.path.getsize(local_p) > 0)
+            if not is_downloaded:
+                is_downloaded = any(
+                    t.file_path == v_name and t.dest_dir == dest_dir and t.status == "已完成" 
+                    for t in self.tasks
+                )
+
+            # If not downloaded, default check highest quality; if already downloaded, do not default check to avoid redundant downloads
+            is_default = (idx == 0) and not is_downloaded
             if is_default:
                 self.checked_tw_variants.add(idx)
             
-            chk_sym = "☑" if is_default else "☐"
-            tag = "checked_tag" if is_default else "file_tag"
+            is_chk = idx in self.checked_tw_variants
+            chk_sym = "☑" if is_chk else "☐"
+            
+            q_label = v["quality"]
+            if is_downloaded:
+                q_label = f"{q_label} [🟢 已下载]"
+                fn_label = f"{v_name} (双击直接0流量播放本地文件)"
+                tag = "downloaded_checked_tag" if is_chk else "downloaded_tag"
+            else:
+                fn_label = v_name
+                tag = "checked_tag" if is_chk else "file_tag"
+
             self.tree_tw_variants.insert(
                 "", tk.END, iid=str(idx),
-                values=(chk_sym, v["quality"], v["bitrate_str"], v["size_str"], v["filename"]),
+                values=(chk_sym, q_label, v["bitrate_str"], v["size_str"], fn_label),
                 tags=(tag,)
             )
 
@@ -4315,7 +4342,15 @@ class HFDownloaderApp(tk.Tk):
             chk_sym = "☑" if is_chk else "☐"
             vals = list(self.tree_tw_variants.item(iid, "values"))
             vals[0] = chk_sym
-            self.tree_tw_variants.item(iid, values=vals, tags=("checked_tag" if is_chk else "file_tag",))
+            
+            # Check if this item is marked as downloaded
+            is_downloaded = len(vals) > 1 and "[🟢 已下载]" in str(vals[1])
+            if is_downloaded:
+                tag = "downloaded_checked_tag" if is_chk else "downloaded_tag"
+            else:
+                tag = "checked_tag" if is_chk else "file_tag"
+                
+            self.tree_tw_variants.item(iid, values=vals, tags=(tag,))
 
     def _update_tw_checked_count_label(self):
         cnt = len(self.checked_tw_variants)
