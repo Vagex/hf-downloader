@@ -660,7 +660,9 @@ class UniversalMediaResolver:
                     "raw_size": filesize or 0,
                     "url": furl,
                     "filename": clean_fn,
-                    "http_headers": info.get('http_headers') or {}
+                    "http_headers": info.get('http_headers') or {},
+                    "format_id": str(f.get('format_id') or ""),
+                    "source_url": target_url
                 })
 
             video_variants.sort(key=lambda x: (x["height"], x["bitrate"]), reverse=True)
@@ -1764,7 +1766,19 @@ def main(page: ft.Page):
 
             log(f"[任务 #{current_task.task_id}] 开始下载: {os.path.basename(current_task.file_path)} (代理: {proxy_str or '直连'})")
 
-            success = _stream_download(download_url, target_file_path, headers, proxies, current_task)
+            # Check if this task requires yt-dlp native extraction & muxing engine (e.g. YouTube googlevideo streams, DASH video+audio muxing)
+            is_ytdlp_stream = bool(
+                getattr(current_task, "source_url", None) or 
+                getattr(current_task, "format_id", None) or 
+                "googlevideo.com" in (current_task.direct_url or "") or
+                current_task.platform in ("youtube", "universal")
+            )
+            if is_ytdlp_stream and (getattr(current_task, "source_url", None) or current_task.direct_url):
+                src_target = getattr(current_task, "source_url", None) or current_task.direct_url
+                log(f"     [专业引擎] 启用 yt-dlp 高清无损分片与音视频混流下载引擎...")
+                success = _download_via_ytdlp(src_target, getattr(current_task, "format_id", None), target_file_path, proxy_str, current_task)
+            else:
+                success = _stream_download(download_url, target_file_path, headers, proxies, current_task)
 
             if stop_queue_requested or cancel_current_task:
                 current_task.status = "已中断"
@@ -1817,6 +1831,82 @@ def main(page: ft.Page):
         btn_start_q.disabled = False
         btn_stop_q.disabled = True
         reset_global_progress("队列运行结束")
+
+    def _download_via_ytdlp(source_url: str, format_id: Optional[str], local_path: str, proxy: Optional[str], task: QueueTask) -> bool:
+        nonlocal cancel_current_task
+        import yt_dlp
+        
+        last_update = [0.0]
+        if format_id and format_id not in ("None", ""):
+            fmt = f"{format_id}+bestaudio/best" if not local_path.endswith(".m4a") else format_id
+        else:
+            fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+
+        def progress_hook(d):
+            if cancel_current_task or stop_queue_requested:
+                raise yt_dlp.utils.DownloadCancelled("用户取消")
+            
+            status = d.get('status')
+            if status == 'downloading':
+                total = d.get('total_bytes') or d.get('total_bytes_estimate') or task.total_bytes or 0
+                downloaded = d.get('downloaded_bytes') or 0
+                speed = d.get('speed') or 0
+                eta = d.get('eta') or 0
+                
+                now = time.time()
+                if now - last_update[0] >= 0.3:
+                    last_update[0] = now
+                    speed_str = format_size(int(speed)) + "/s" if speed else "--"
+                    eta_str = f"{eta // 60}分{eta % 60}秒" if eta > 60 else (f"{eta}秒" if eta else "--")
+                    
+                    if total > 0:
+                        pct = min(99.9, (downloaded / total) * 100.0)
+                        task.progress = pct
+                        task.total_bytes = total
+                        task.speed_str = speed_str
+                        task.eta_str = eta_str
+                        pb_global.value = pct / 100.0
+                        lbl_global_pct.value = f"进度: {pct:.1f}% ({format_size(downloaded)} / {format_size(total)})"
+                        lbl_global_speed.value = f"速度: {speed_str} | 预估剩余: {eta_str}"
+                        page.update()
+            elif status == 'finished':
+                task.progress = 100.0
+
+        ydl_opts = {
+            'format': fmt,
+            'outtmpl': local_path,
+            'progress_hooks': [progress_hook],
+            'quiet': True,
+            'no_warnings': True,
+            'nocheckcertificate': True,
+            'socket_timeout': 25,
+            'retries': 10,
+            'fragment_retries': 10,
+            'merge_output_format': 'mp4',
+        }
+        if proxy:
+            ydl_opts['proxy'] = proxy
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([source_url])
+            
+            if os.path.exists(local_path) and os.path.getsize(local_path) > 1024:
+                return True
+            
+            base, _ = os.path.splitext(local_path)
+            for ext in ('.mp4', '.mkv', '.webm', '.m4a'):
+                alt = base + ext
+                if os.path.exists(alt) and os.path.getsize(alt) > 1024:
+                    if alt != local_path:
+                        if os.path.exists(local_path):
+                            os.remove(local_path)
+                        os.rename(alt, local_path)
+                    return True
+            return False
+        except Exception as e:
+            task.error_msg = str(e)
+            return False
 
     def _stream_download(url: str, local_path: str, headers: dict, proxies: Optional[dict], task: QueueTask) -> bool:
         nonlocal cancel_current_task
@@ -3312,7 +3402,9 @@ def main(page: ft.Page):
                 progress=0.0,
                 total_bytes=v["raw_size"] if v["raw_size"] > 0 else None,
                 platform="twitter",
-                direct_url=v_url
+                direct_url=v_url,
+                source_url=v.get("source_url"),
+                format_id=v.get("format_id")
             )
             task.check_local_status()
             tasks.append(task)
