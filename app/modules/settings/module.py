@@ -253,8 +253,18 @@ class SettingsModule(BaseAppModule):
             # Step 1: Install Python packages
             pkgs = [p[0] for p in SUPER_APP_CORE_PACKAGES]
             cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + pkgs + ["-i", mirror_url]
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, encoding="utf-8", errors="replace")
+                proc = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT, 
+                    text=True, 
+                    bufsize=1, 
+                    encoding="utf-8", 
+                    errors="replace",
+                    creationflags=creationflags
+                )
                 for line in proc.stdout:
                     self.container_after(lambda l=line: (self.txt_env_log.insert(tk.END, l), self.txt_env_log.see(tk.END)))
                 proc.wait()

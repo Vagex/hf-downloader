@@ -5789,8 +5789,18 @@ class HFDownloaderView(ttk.Frame):
         def _worker():
             pkgs = [p[0] for p in CORE_PACKAGES]
             cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + pkgs + ["-i", mirror_url]
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, encoding="utf-8", errors="replace")
+                proc = subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT, 
+                    text=True, 
+                    bufsize=1, 
+                    encoding="utf-8", 
+                    errors="replace",
+                    creationflags=creationflags
+                )
                 for line in proc.stdout:
                     self.after(0, lambda l=line: (self.tab_env_log_text.insert(tk.END, l), self.tab_env_log_text.see(tk.END)))
                 proc.wait()
