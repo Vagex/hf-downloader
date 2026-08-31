@@ -4026,22 +4026,23 @@ class HFDownloaderView(ttk.Frame):
         config_frame.pack(fill=tk.X, pady=(0, 4))
 
         # Row 0: Repo ID, Mode (Release/SourceTree), Branch/Tag, Fetch Button, History Button
-        ttk.Label(config_frame, text="GitHub 仓库 (owner/repo):").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
+        ttk.Label(config_frame, text="GitHub 仓库:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=3)
         self.gh_repo_var = tk.StringVar(value="comfyanonymous/ComfyUI")
-        self.gh_repo_combo = ttk.Combobox(config_frame, textvariable=self.gh_repo_var, values=HistoryManager.get_recent_repos("github"), width=28, font=FONT_NORMAL)
+        self.gh_repo_combo = ttk.Combobox(config_frame, textvariable=self.gh_repo_var, values=HistoryManager.get_recent_repos("github"), font=FONT_NORMAL)
         self.gh_repo_combo.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=3)
+        ToolTip(self.gh_repo_combo, "GitHub 仓库标识 (格式: owner/repo，例如 comfyanonymous/ComfyUI)")
 
-        ttk.Label(config_frame, text="资源模式:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=3)
-        self.gh_mode_var = tk.StringVar(value="📦 Release 发布包")
-        gh_mode_combo = ttk.Combobox(config_frame, textvariable=self.gh_mode_var, values=["📦 Release 发布包", "🌲 源码目录树"], width=14, state="readonly", font=FONT_NORMAL)
+        ttk.Label(config_frame, text="模式:").grid(row=0, column=2, sticky=tk.W, padx=4, pady=3)
+        self.gh_mode_var = tk.StringVar(value="📦 Release")
+        gh_mode_combo = ttk.Combobox(config_frame, textvariable=self.gh_mode_var, values=["📦 Release", "🌲 源码树"], width=8, state="readonly", font=FONT_NORMAL)
         gh_mode_combo.grid(row=0, column=3, sticky=tk.W, padx=4, pady=3)
 
-        ttk.Label(config_frame, text="分支/Tag:").grid(row=0, column=4, sticky=tk.W, padx=4, pady=3)
+        ttk.Label(config_frame, text="分支:").grid(row=0, column=4, sticky=tk.W, padx=4, pady=3)
         self.gh_branch_var = tk.StringVar(value="master")
-        gh_branch_entry = ttk.Entry(config_frame, textvariable=self.gh_branch_var, width=9, font=FONT_NORMAL)
+        gh_branch_entry = ttk.Entry(config_frame, textvariable=self.gh_branch_var, width=6, font=FONT_NORMAL)
         gh_branch_entry.grid(row=0, column=5, sticky=tk.W, padx=4, pady=3)
 
-        self.btn_gh_fetch = ttk.Button(config_frame, text=" 获取 GitHub 资源", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_github)
+        self.btn_gh_fetch = ttk.Button(config_frame, text=" 获取资源", image=self.icons["search"], compound=tk.LEFT, command=self.start_fetch_github)
         self.btn_gh_fetch.grid(row=0, column=6, padx=4, pady=3)
 
         btn_gh_hist = ttk.Button(config_frame, text=" 历史/收藏...", image=self.icons["clock"], compound=tk.LEFT, command=lambda: self.open_history_dialog("github"))
