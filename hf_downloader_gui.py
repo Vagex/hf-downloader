@@ -6825,7 +6825,7 @@ class HFDownloaderApp(tk.Tk):
                 text=f"正在下载 [#{t.task_id}]: {os.path.basename(t.file_path)}", foreground="blue"
             ))
 
-            # Check if this task is a Magnet / BitTorrent task
+            # Branch 1: Magnet / BitTorrent P2P Task
             if current_task.platform == "magnet" or (current_task.direct_url and current_task.direct_url.startswith("magnet:?")):
                 self.log(f"     [磁力下载] 启用 Aria2 高性能 P2P/DHT 极速下载引擎...")
                 magnet_link = current_task.direct_url or current_task.file_path
@@ -6848,17 +6848,15 @@ class HFDownloaderApp(tk.Tk):
                     cancel_checker=lambda: self.cancel_current_task or self.stop_queue_requested,
                     log_callback=self.log
                 )
-            # Check if this task requires yt-dlp native extraction & muxing engine (e.g. YouTube googlevideo streams, DASH video+audio muxing)
-            is_ytdlp_stream = bool(
-                getattr(current_task, "source_url", None) or 
-                getattr(current_task, "format_id", None) or 
-                "googlevideo.com" in (current_task.direct_url or "") or
-                current_task.platform in ("youtube", "universal")
-            )
-            if is_ytdlp_stream and (getattr(current_task, "source_url", None) or current_task.direct_url):
+            # Branch 2: yt-dlp Video & DASH Muxing Engine (YouTube / Complex Media)
+            elif (getattr(current_task, "source_url", None) or 
+                  getattr(current_task, "format_id", None) or 
+                  "googlevideo.com" in (current_task.direct_url or "") or
+                  current_task.platform in ("youtube", "universal")) and (getattr(current_task, "source_url", None) or current_task.direct_url):
                 src_target = getattr(current_task, "source_url", None) or current_task.direct_url
                 self.log(f"     [专业引擎] 启用 yt-dlp 高清无损分片与音视频混流下载引擎...")
                 success = self._download_via_ytdlp(src_target, getattr(current_task, "format_id", None), target_file_path, proxy_str, current_task)
+            # Branch 3: High-Speed Multi-Thread Stream Downloader (HuggingFace / GitHub / Direct HTTP)
             else:
                 success = self._stream_download(download_url, target_file_path, headers, proxies, current_task)
 
@@ -6869,6 +6867,14 @@ class HFDownloaderApp(tk.Tk):
                 current_task.status = "已完成"
                 current_task.progress = 100.0
                 self.log(f"[✓] 任务 #{current_task.task_id} 下载完成！")
+            else:
+                current_task.status = "失败"
+                err_detail = current_task.error_msg or "网络连接异常或资源无法获取"
+                self.log(f"[✗] 任务 #{current_task.task_id} 下载失败: {err_detail}")
+                if "401" in err_detail or "403" in err_detail:
+                    self.log("    💡 提示: 该资源可能需要 HuggingFace Token 授权，请在 Tab 1 设置中填写 Token。")
+                elif "404" in err_detail:
+                    self.log("    💡 提示: 该文件在当前镜像源不存在 (HTTP 404)，建议切换为官方直连或更换镜像源。")
 
                 # Auto-extract and organize GitHub Zip packages into subfolder
                 if current_task.repo_type == "github_zip" and target_file_path.endswith(".zip"):
@@ -6994,7 +7000,13 @@ class HFDownloaderApp(tk.Tk):
 
         # Build candidate URL list for auto-failover
         candidate_urls = [url]
-        if task.platform == "github":
+        if task.platform in ("hf", "huggingface", "model", "dataset") or "huggingface.co" in url or "hf-mirror.com" in url:
+            if "hf-mirror.com" in url:
+                candidate_urls.append(url.replace("https://hf-mirror.com", "https://huggingface.co"))
+                candidate_urls.append(url.replace("https://hf-mirror.com", "https://hf.co"))
+            elif "huggingface.co" in url:
+                candidate_urls.append(url.replace("https://huggingface.co", "https://hf-mirror.com"))
+        elif task.platform == "github":
             raw_target = url
             for m in DEFAULT_GITHUB_ACCELERATORS:
                 if m != "不使用加速 (官方直连)" and raw_target.startswith(m):
