@@ -15,6 +15,13 @@ os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 if sys.platform == "win32":
     try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd != 0:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception:
+        pass
+    try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:

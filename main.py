@@ -1,5 +1,15 @@
 import os
 import sys
+import ctypes
+
+# 🛡️ 彻底隐藏 CMD 控制台黑窗口 (Win32 SW_HIDE)
+if sys.platform == "win32":
+    try:
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd != 0:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception:
+        pass
 
 # Ensure root directory is on PYTHONPATH
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
