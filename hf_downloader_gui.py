@@ -5922,16 +5922,24 @@ class HFDownloaderView(ttk.Frame):
 
         self.after(0, update_ui_result)
 
+    def _get_toplevel(self):
+        try:
+            return self.winfo_toplevel()
+        except Exception:
+            return self
+
     # ------------------ Safe Exit & Minimize to Background ------------------
     def hide_to_background(self):
+        top = self._get_toplevel()
         if not self.is_queue_running:
             if messagebox.askyesno("提示", "当前没有正在进行的下载任务，确定要最小化隐藏到后台吗？", parent=self):
-                self.iconify()
+                top.iconify()
         else:
             messagebox.showinfo("后台静默运行", "下载器已在后台全速下载。\n您可以通过任务栏或重新运行启动器随时切回窗口。", parent=self)
-            self.iconify()
+            top.iconify()
 
     def _on_window_closing(self):
+        top = self._get_toplevel()
         if self.is_queue_running:
             choice = messagebox.askyesnocancel(
                 "下载正在进行中",
@@ -5941,7 +5949,7 @@ class HFDownloaderView(ttk.Frame):
                 "• 点击【取消 (Cancel)】：留在此页面"
             )
             if choice is True:
-                self.iconify()
+                top.iconify()
                 return
             elif choice is False:
                 self.stop_queue_requested = True
@@ -5949,14 +5957,14 @@ class HFDownloaderView(ttk.Frame):
                 self._save_tasks()
                 self._save_settings()
                 self._update_lock_file(False)
-                self.destroy()
+                top.destroy()
             else:
                 return
         else:
             self._save_tasks()
             self._save_settings()
             self._update_lock_file(False)
-            self.destroy()
+            top.destroy()
 
     # ------------------ Task Persistence & Rescan ------------------
     def _load_saved_tasks(self):
