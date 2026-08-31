@@ -1,0 +1,2121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>课堂智能点名转盘 Pro - 互动教学系统</title>
+<style>
+:root {
+  --bg-primary: #0b0f19;
+  --bg-secondary: rgba(18, 26, 47, 0.82);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --accent-cyan: #00f2fe;
+  --accent-blue: #4facfe;
+  --accent-purple: #7f00ff;
+  --accent-pink: #ff007f;
+  --accent-gold: #ffd200;
+  --accent-green: #00f5a0;
+  --text-main: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.65);
+  --glow-shadow: 0 0 25px rgba(0, 242, 254, 0.35);
+  --radius-lg: 20px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+/* 主题预设 */
+body[data-theme="warm"] {
+  --bg-primary: #1a0f0f;
+  --bg-secondary: rgba(45, 22, 22, 0.82);
+  --accent-cyan: #ff7e5f;
+  --accent-blue: #feb47b;
+  --glow-shadow: 0 0 25px rgba(255, 126, 95, 0.4);
+}
+body[data-theme="mint"] {
+  --bg-primary: #081714;
+  --bg-secondary: rgba(13, 38, 33, 0.82);
+  --accent-cyan: #00f5a0;
+  --accent-blue: #00d9f5;
+  --glow-shadow: 0 0 25px rgba(0, 245, 160, 0.35);
+}
+body[data-theme="neon"] {
+  --bg-primary: #120924;
+  --bg-secondary: rgba(32, 16, 64, 0.82);
+  --accent-cyan: #ff007f;
+  --accent-blue: #7f00ff;
+  --glow-shadow: 0 0 25px rgba(255, 0, 127, 0.4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+html, body {
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  font-family: var(--font-family);
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* 动态背景星光/流光 */
+.bg-canvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 主布局 */
+.layout-container {
+  position: relative;
+  z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 20px 30px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 顶部导航栏 */
+.header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--bg-secondary);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-icon {
+  font-size: 26px;
+  filter: drop-shadow(0 0 8px var(--accent-cyan));
+  animation: floatIcon 3s ease-in-out infinite;
+}
+@keyframes floatIcon {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(5deg); }
+}
+.brand-title h1 {
+  font-size: clamp(18px, 3.2vw, 24px);
+  font-weight: 800;
+  background: linear-gradient(120deg, #fff 20%, var(--accent-cyan) 80%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: 0.5px;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip-select, .icon-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-border);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+}
+.chip-select:hover, .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: var(--accent-cyan);
+  transform: translateY(-1px);
+}
+.icon-btn.active {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  border-color: transparent;
+  box-shadow: 0 0 12px rgba(79, 172, 254, 0.4);
+}
+
+/* 主内容双栏响应式布局 */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  flex: 1;
+}
+@media (min-width: 960px) {
+  .main-grid {
+    grid-template-columns: 1.15fr 0.85fr;
+  }
+}
+
+/* 转盘展示区面板 */
+.panel {
+  background: var(--bg-secondary);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 顶部状态条与模式切换 */
+.wheel-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.stats-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  background: rgba(255, 210, 0, 0.12);
+  padding: 6px 14px;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 210, 0, 0.3);
+}
+.mode-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  border-radius: 30px;
+  border: 1px solid var(--panel-border);
+}
+.mode-tab-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.25s;
+}
+.mode-tab-btn.active {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  color: #051026;
+  box-shadow: 0 2px 10px rgba(0, 242, 254, 0.4);
+}
+
+/* 轮盘主体容器 */
+.wheel-wrapper {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0 15px;
+  width: 100%;
+  max-width: 440px;
+  aspect-ratio: 1 / 1;
+}
+
+/* 外环灯光特效 */
+.outer-led-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px dashed rgba(0, 242, 254, 0.35);
+  box-shadow: inset 0 0 20px rgba(0, 242, 254, 0.15), 0 0 25px rgba(0, 242, 254, 0.2);
+  pointer-events: none;
+  animation: rotateRing 25s linear infinite;
+}
+@keyframes rotateRing {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+canvas#wheelCanvas {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1a2238 0%, #0c101d 100%);
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(255,255,255,0.05);
+  z-index: 1;
+}
+
+/* 现代指针设计 */
+.pointer-node {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  filter: drop-shadow(0 6px 12px rgba(255, 45, 85, 0.7));
+  transition: transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.pointer-needle {
+  width: 0;
+  height: 0;
+  border-left: 18px solid transparent;
+  border-right: 18px solid transparent;
+  border-top: 38px solid #ff2a5f;
+  position: relative;
+}
+.pointer-needle::after {
+  content: '';
+  position: absolute;
+  top: -38px;
+  left: -8px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #ff2a5f;
+}
+.pointer-node.ticking {
+  animation: pointerTick 0.15s ease-out;
+}
+@keyframes pointerTick {
+  0% { transform: translateX(-50%) rotate(0deg) scale(1); }
+  50% { transform: translateX(-50%) rotate(-12deg) scale(1.1); }
+  100% { transform: translateX(-50%) rotate(0deg) scale(1); }
+}
+
+/* 中心按钮 */
+.spin-center-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: clamp(80px, 20vw, 100px);
+  height: clamp(80px, 20vw, 100px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffffff, #d9e2ec 50%, #9fb3c8 100%);
+  border: 4px solid #141b2d;
+  color: #0c1427;
+  font-weight: 900;
+  font-size: clamp(16px, 4vw, 20px);
+  letter-spacing: 1px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 15px rgba(255,255,255,0.4);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 20;
+}
+.spin-center-btn:hover {
+  transform: translate(-50%, -50%) scale(1.06);
+  box-shadow: 0 12px 30px rgba(0, 242, 254, 0.5), 0 0 20px rgba(255, 255, 255, 0.8);
+}
+.spin-center-btn:active {
+  transform: translate(-50%, -50%) scale(0.95);
+}
+.spin-center-btn.running {
+  background: radial-gradient(circle at 35% 35%, #ff4b4b, #d90429 80%);
+  color: #fff;
+  box-shadow: 0 0 25px rgba(255, 59, 48, 0.8);
+  animation: pulseSpin 1s infinite alternate;
+}
+.spin-center-btn.disabled {
+  background: #3a4256;
+  color: #718096;
+  cursor: not-allowed;
+  transform: translate(-50%, -50%) scale(1);
+  box-shadow: none;
+}
+@keyframes pulseSpin {
+  from { transform: translate(-50%, -50%) scale(1.02); }
+  to { transform: translate(-50%, -50%) scale(1.1); }
+}
+
+/* 闪烁大卡片点名模式视图 (Slot Mode) */
+.slot-mode-view {
+  display: none;
+  width: 100%;
+  min-height: 380px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  padding: 20px 0;
+}
+.slot-display-card {
+  width: 90%;
+  max-width: 380px;
+  height: 220px;
+  background: linear-gradient(145deg, rgba(25, 36, 68, 0.9), rgba(12, 18, 38, 0.95));
+  border: 2px solid var(--accent-cyan);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-shadow: var(--glow-shadow), inset 0 0 30px rgba(0, 242, 254, 0.1);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+.slot-display-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%; width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+  transform: skewX(-25deg);
+  animation: shineScan 3.5s infinite;
+}
+@keyframes shineScan {
+  0% { left: -100%; }
+  25%, 100% { left: 200%; }
+}
+.slot-num {
+  font-size: clamp(48px, 12vw, 76px);
+  font-weight: 900;
+  color: var(--accent-gold);
+  line-height: 1;
+  text-shadow: 0 0 20px rgba(255, 210, 0, 0.6);
+}
+.slot-name {
+  font-size: clamp(26px, 6vw, 36px);
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 8px;
+  letter-spacing: 2px;
+}
+.slot-actions {
+  margin-top: 25px;
+  display: flex;
+  gap: 15px;
+}
+.btn-slot-start {
+  padding: 14px 45px;
+  font-size: 18px;
+  font-weight: 800;
+  border-radius: 40px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  color: #051026;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 242, 254, 0.4);
+  transition: 0.2s;
+}
+.btn-slot-start:hover {
+  transform: scale(1.05);
+  box-shadow: 0 8px 25px rgba(0, 242, 254, 0.6);
+}
+
+/* 控制按钮网格 */
+.control-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 15px;
+}
+@media (min-width: 480px) {
+  .control-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.action-btn {
+  border: 1px solid var(--panel-border);
+  padding: 12px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.action-btn i { font-size: 18px; font-style: normal; }
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--accent-cyan);
+  transform: translateY(-2px);
+}
+.action-btn.primary {
+  background: linear-gradient(135deg, rgba(0, 242, 254, 0.2), rgba(79, 172, 254, 0.2));
+  border-color: rgba(0, 242, 254, 0.4);
+}
+.action-btn.warning {
+  background: rgba(255, 59, 48, 0.15);
+  border-color: rgba(255, 59, 48, 0.3);
+}
+.action-btn.warning:hover {
+  background: rgba(255, 59, 48, 0.3);
+  border-color: #ff3b30;
+}
+
+/* 右侧管理与历史面板 */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  background: var(--bg-secondary);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.card-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.badge-count {
+  background: rgba(255, 255, 255, 0.12);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--accent-cyan);
+}
+
+/* 抽中记录展示瀑布流/网格 */
+.winners-box {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.winners-box::-webkit-scrollbar {
+  width: 5px;
+}
+.winners-box::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.winner-card {
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.18), rgba(255, 142, 83, 0.22));
+  border: 1px solid rgba(255, 142, 83, 0.35);
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  gap: 4px;
+}
+@keyframes popIn {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.winner-card-info {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+.winner-card .w-num {
+  font-size: 13px;
+  color: var(--accent-gold);
+  font-weight: 800;
+}
+.winner-card .w-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 75px;
+}
+.winner-card-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 2px;
+}
+.winner-card .w-time {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.btn-restore-single {
+  background: rgba(0, 242, 254, 0.15);
+  border: 1px solid rgba(0, 242, 254, 0.4);
+  color: var(--accent-cyan);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  transition: 0.15s;
+}
+.btn-restore-single:hover {
+  background: rgba(0, 242, 254, 0.35);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.empty-tip {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 30px 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* 选项配置开关区 */
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+.setting-desc {
+  display: flex;
+  flex-direction: column;
+}
+.setting-title { font-weight: 600; }
+.setting-sub { font-size: 11px; color: var(--text-muted); }
+
+/* Switch 开关组件 */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  display: inline-block;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background-color: rgba(255, 255, 255, 0.15);
+  transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 24px;
+  border: 1px solid var(--panel-border);
+}
+.slider:before {
+  position: absolute; content: "";
+  height: 18px; width: 18px; left: 2px; bottom: 2px;
+  background-color: white;
+  transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+}
+input:checked + .slider {
+  background-color: var(--accent-blue);
+  border-color: var(--accent-cyan);
+}
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* 抽中弹窗 Overlay (Big Winner Overlay) */
+.winner-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 8, 20, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 500;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.winner-modal-overlay.active {
+  display: flex;
+  opacity: 1;
+}
+
+.winner-card-big {
+  background: radial-gradient(circle at 50% 30%, #202b48, #0e1322 90%);
+  border: 2px solid var(--accent-gold);
+  padding: 30px 35px;
+  border-radius: 28px;
+  text-align: center;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.8), 0 0 50px rgba(255, 210, 0, 0.4);
+  transform: scale(0.5);
+  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  max-width: 92%;
+  width: 440px;
+  position: relative;
+  overflow: hidden;
+}
+.winner-modal-overlay.active .winner-card-big {
+  transform: scale(1);
+}
+
+.big-congrats {
+  font-size: 16px;
+  color: var(--accent-gold);
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.big-name-box {
+  background: linear-gradient(135deg, #ff416c, #ff4b2b);
+  padding: 18px 24px;
+  border-radius: 20px;
+  margin: 15px 0 20px;
+  box-shadow: 0 10px 30px rgba(255, 65, 108, 0.4);
+}
+.big-val {
+  font-size: clamp(24px, 5vw, 32px);
+  font-weight: 800;
+  color: #ffeaa7;
+}
+.big-name {
+  font-size: clamp(38px, 10vw, 56px);
+  font-weight: 900;
+  color: #ffffff;
+  line-height: 1.1;
+  text-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+.big-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+.big-btn {
+  padding: 10px 20px;
+  border-radius: 30px;
+  border: none;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.big-btn.continue {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  color: #04091a;
+}
+.big-btn.score {
+  background: rgba(255, 210, 0, 0.2);
+  color: var(--accent-gold);
+  border: 1px solid var(--accent-gold);
+}
+.big-btn.putback {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid var(--panel-border);
+}
+.big-btn.putback:hover {
+  background: rgba(0, 242, 254, 0.25);
+  border-color: var(--accent-cyan);
+}
+
+/* 多人连抽结果展示 */
+.multi-winner-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+  margin: 15px 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.multi-winner-item {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-md);
+  padding: 10px 6px;
+  font-weight: 700;
+}
+
+/* 统一通用弹出层 Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 400;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+}
+.modal-backdrop.active { display: flex; }
+
+.modal-box {
+  background: #141b2e;
+  border: 1px solid var(--panel-border);
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  position: relative;
+}
+.modal-box h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: #fff;
+}
+.input-area {
+  width: 100%;
+  height: 160px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  color: #fff;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+}
+.input-area:focus { border-color: var(--accent-cyan); }
+.modal-footer-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.m-btn {
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 13px;
+}
+.m-btn.confirm {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+  color: #04091a;
+}
+.m-btn.cancel {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* 学生签到/出勤/待抽状态管理抽屉 */
+.roster-check-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 4px;
+  margin: 12px 0;
+}
+.roster-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.roster-item.drawn {
+  border-left: 3px solid #ff416c;
+  background: rgba(255, 65, 108, 0.1);
+}
+.roster-item.active-pool {
+  border-left: 3px solid #00f5a0;
+}
+.roster-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.roster-tag.drawn-tag {
+  background: rgba(255, 65, 108, 0.25);
+  color: #ff758c;
+}
+.roster-tag.inpool-tag {
+  background: rgba(0, 245, 160, 0.2);
+  color: #00f5a0;
+}
+
+/* 顶部轻量浮动通知 Toast */
+.toast-msg {
+  position: fixed;
+  top: 25px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-30px);
+  background: rgba(14, 22, 42, 0.95);
+  border: 1px solid var(--accent-cyan);
+  color: #fff;
+  padding: 10px 22px;
+  border-radius: 30px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 10px 30px rgba(0, 242, 254, 0.35);
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.toast-msg.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+/* 底部信息 */
+.footer-text {
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  padding-top: 15px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  letter-spacing: 0.5px;
+}
+
+/* 全屏白板模式定制 */
+body.fullscreen-mode .layout-container {
+  max-width: 100vw;
+  padding: 10px 25px;
+}
+body.fullscreen-mode .wheel-wrapper {
+  max-width: min(70vh, 560px);
+}
+</style>
+</head>
+<body>
+
+<!-- 粒子动画背景 Canvas -->
+<canvas class="bg-canvas" id="bgCanvas"></canvas>
+
+<!-- 烟花礼花 Canvas -->
+<canvas class="bg-canvas" id="confettiCanvas" style="z-index: 600;"></canvas>
+
+<!-- Toast 提示条 -->
+<div class="toast-msg" id="toastBox">
+  <span id="toastIcon">✨</span>
+  <span id="toastText">已放回待抽名单</span>
+</div>
+
+<div class="layout-container">
+  <!-- 顶部状态栏 -->
+  <header class="header-bar">
+    <div class="brand-title">
+      <span class="brand-icon">🎡</span>
+      <div>
+        <h1>课堂智能点名转盘 Pro</h1>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <!-- 班级选择下拉 -->
+      <select id="classSelect" class="chip-select" onchange="switchClassPreset(this.value)">
+        <option value="default">默认班级 (1-45)</option>
+      </select>
+      
+      <!-- 主题切换 -->
+      <select id="themeSelect" class="chip-select" onchange="switchTheme(this.value)">
+        <option value="default">🌌 星空极光</option>
+        <option value="warm">🌅 活力暖阳</option>
+        <option value="mint">🍃 青春校园</option>
+        <option value="neon">🔮 赛博霓虹</option>
+      </select>
+
+      <!-- 音效控制 -->
+      <button class="icon-btn" id="soundToggleBtn" onclick="toggleAudio()" title="音效开关 (快捷键 M)">
+        <span id="soundIcon">🔊</span>
+      </button>
+
+      <!-- 白板全屏切换 -->
+      <button class="icon-btn" onclick="toggleFullscreen()" title="大屏/全屏模式 (快捷键 F)">
+        <span>⛶ 全屏</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 主体工作区 -->
+  <main class="main-grid">
+    <!-- 左侧：转盘核心区 -->
+    <section class="panel">
+      <!-- 模式与状态 -->
+      <div class="wheel-header">
+        <div class="stats-badge">
+          <span>👥 本轮待抽:</span>
+          <strong id="remainCount">0</strong>
+          <span style="font-size:12px;opacity:0.8;">/ 总共 <span id="totalCount">0</span></span>
+        </div>
+
+        <div class="mode-tabs">
+          <button class="mode-tab-btn active" id="tabWheel" onclick="setRollMode('wheel')">🎯 转盘模式</button>
+          <button class="mode-tab-btn" id="tabSlot" onclick="setRollMode('slot')">⚡ 极速点名</button>
+        </div>
+      </div>
+
+      <!-- 转盘视图 -->
+      <div class="wheel-wrapper" id="wheelWrapper">
+        <div class="outer-led-ring"></div>
+        <div class="pointer-node" id="pointerNode">
+          <div class="pointer-needle"></div>
+        </div>
+        <canvas id="wheelCanvas" width="800" height="800"></canvas>
+        <div id="spinBtn" class="spin-center-btn" onclick="handleSpinClick()">
+          <span id="btnMainText">START</span>
+          <span style="font-size:10px;opacity:0.8;font-weight:400;margin-top:2px;" id="btnSubText">空格键</span>
+        </div>
+      </div>
+
+      <!-- 闪烁大卡片视图 (大班级/极速抽取) -->
+      <div class="slot-mode-view" id="slotWrapper">
+        <div class="slot-display-card">
+          <div class="slot-num" id="slotCardNum">--</div>
+          <div class="slot-name" id="slotCardName">准备就绪</div>
+        </div>
+        <div class="slot-actions">
+          <button class="btn-slot-start" id="slotStartBtn" onclick="handleSpinClick()">🎲 开始点名 (Space)</button>
+        </div>
+      </div>
+
+      <!-- 底部快捷控制按钮组 -->
+      <div class="control-grid">
+        <button class="action-btn primary" onclick="openImportModal()">
+          <i>✍️</i>
+          <span>编辑/导入名单</span>
+        </button>
+        <button class="action-btn" onclick="document.getElementById('fileInput').click()">
+          <i>📂</i>
+          <span>导入TXT/表格</span>
+        </button>
+        <button class="action-btn" onclick="openRosterModal()">
+          <i>📋</i>
+          <span>学生出勤/状态</span>
+        </button>
+        <button class="action-btn warning" onclick="resetRound()">
+          <i>🔄</i>
+          <span>重置本轮待抽</span>
+        </button>
+      </div>
+
+      <input type="file" id="fileInput" accept=".txt,.csv" style="display:none;" onchange="handleFileSelect(event)">
+    </section>
+
+    <!-- 右侧：抽中历史与高级设置 -->
+    <aside class="side-panel">
+      <!-- 抽中榜单记录 -->
+      <div class="card" style="flex: 1;">
+        <div class="card-header">
+          <h3>🏆 已点名同学 <span class="badge-count" id="winnerCount">0</span></h3>
+          <div style="display:flex;gap:6px;">
+            <button class="chip-select" style="padding:3px 8px;font-size:11px;" onclick="restoreAllWinners()" title="将所有已抽中同学全部放回待抽池">↩️ 全部放回</button>
+            <button class="chip-select" style="padding:3px 8px;font-size:11px;" onclick="exportHistory()">📋 复制记录</button>
+            <button class="chip-select" style="padding:3px 8px;font-size:11px;" onclick="clearHistoryRecords()">🗑️ 清空</button>
+          </div>
+        </div>
+        <div class="winners-box" id="winnersContainer">
+          <div class="empty-tip">暂无已点名记录，点击 START 开始点名吧！</div>
+        </div>
+      </div>
+
+      <!-- 功能选项设置 -->
+      <div class="card">
+        <div class="card-header">
+          <h3>⚙️ 点名规则与语音</h3>
+        </div>
+        <div class="settings-list">
+          <div class="setting-item">
+            <div class="setting-desc">
+              <span class="setting-title">不重复点名 (淘汰制)</span>
+              <span class="setting-sub">抽中后自动移出待抽池，可随时放回</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="chkNoRepeat" checked onchange="saveConfig()">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-desc">
+              <span class="setting-title">TTS 语音智能播报</span>
+              <span class="setting-sub">中奖后自动播报号码与姓名</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="chkTTS" checked onchange="saveConfig()">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-desc">
+              <span class="setting-title">显示模式 (号码与姓名)</span>
+              <span class="setting-sub">开启显示“序号-姓名”，关闭仅显示序号</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="chkShowName" checked onchange="toggleNameDisplay()">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-desc">
+              <span class="setting-title">单次抽取人数</span>
+              <span class="setting-sub">支持 1~5 人连抽进行小组提问</span>
+            </div>
+            <select id="drawCountSelect" class="chip-select" style="padding:4px 8px;" onchange="saveConfig()">
+              <option value="1">单人 (1人)</option>
+              <option value="2">双人组 (2人)</option>
+              <option value="3">三人组 (3人)</option>
+              <option value="4">四人组 (4人)</option>
+              <option value="5">五人组 (5人)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer-text">
+    © 2026 课堂互动教学系统 Pro • 智能随机点名与评价 • 支持随时放回已抽学生 • [空格]抽选 [F]全屏 [M]静音
+  </footer>
+</div>
+
+<!-- 弹窗：中奖祝贺卡 (Winner Modal) -->
+<div class="winner-modal-overlay" id="winnerOverlay" onclick="closeWinnerModal(event)">
+  <div class="winner-card-big" onclick="event.stopPropagation()">
+    <div class="big-congrats">🎉 恭喜被抽中 🎉</div>
+    <div id="singleWinnerBox">
+      <div class="big-name-box">
+        <div class="big-val" id="bigWinnerVal">--</div>
+        <div class="big-name" id="bigWinnerName">学生姓名</div>
+      </div>
+    </div>
+    <!-- 多人抽中列表容器 -->
+    <div id="multiWinnerBox" style="display:none;">
+      <div class="multi-winner-grid" id="multiWinnerGrid"></div>
+    </div>
+
+    <div class="big-actions">
+      <button class="big-btn score" onclick="addScoreToWinner(1)">⭐ 表现优秀 (+1分)</button>
+      <button class="big-btn putback" onclick="putBackCurrentWinner()">↩️ 放回待抽池</button>
+      <button class="big-btn continue" onclick="closeWinnerModal()">确定 (Enter)</button>
+    </div>
+  </div>
+</div>
+
+<!-- 弹窗：编辑 / 导入名单 (Import Modal) -->
+<div class="modal-backdrop" id="importModal">
+  <div class="modal-box">
+    <h3>✍️ 编辑与导入学生名单</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+      支持格式：<br>
+      • 纯数字范围：<code>1-45</code><br>
+      • 序号+姓名：<code>1 张三</code> 或 <code>01 李四</code> (每行一人)<br>
+      • 纯姓名列表：<code>张三 \n 李四 \n 王五</code> (自动编号)<br>
+      • 逗号/制表符隔开的姓名名单
+    </p>
+    <textarea class="input-area" id="importTextarea" placeholder="例如：&#10;1-45&#10;或者&#10;1 张三&#10;2 李四"></textarea>
+    
+    <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:12px;color:var(--text-muted);">保存为班级:</span>
+      <input type="text" id="classNameInput" placeholder="班级名称(如: 高一3班)" style="flex:1;background:rgba(0,0,0,0.3);border:1px solid var(--panel-border);color:#fff;padding:4px 8px;border-radius:4px;font-size:12px;">
+    </div>
+
+    <div class="modal-footer-btns">
+      <button class="m-btn cancel" onclick="closeModals()">取消</button>
+      <button class="m-btn confirm" onclick="confirmImport()">保存并应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 弹窗：学生在籍/出勤/状态管理 (Roster Check Modal) -->
+<div class="modal-backdrop" id="rosterModal">
+  <div class="modal-box">
+    <h3>📋 学生出勤与待抽状态</h3>
+    <p style="font-size:12px;color:var(--text-muted);">可管理请假状态，或将已被抽中的学生一键放回待抽池：</p>
+    <div class="roster-check-list" id="rosterCheckContainer"></div>
+    <div class="modal-footer-btns">
+      <button class="m-btn cancel" onclick="checkAllRoster(true)">全部参与</button>
+      <button class="m-btn cancel" onclick="restoreAllWinners(false)">放回已抽学生</button>
+      <button class="m-btn confirm" onclick="closeModals()">完成</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/**
+ * 课堂智能点名转盘 Pro
+ * 全功能独立离线版 (含 Web Audio 音频合成器、Retina 4K Canvas 适配、Confetti 烟花粒子、多班级存储、已抽学生随时放回池)
+ */
+
+// 全局状态
+let classData = {};          // 所有班级列表 { className: [ {value, name, absent} ] }
+let currentClass = 'default';
+let originalItems = [];      // 当前班级完整名单
+let items = [];              // 当前待抽池
+let winners = [];            // 历史已点名名单
+let currentMode = 'wheel';   // 'wheel' | 'slot'
+let displayWithNames = true;
+let noRepeatMode = true;
+let isTTSEnabled = true;
+let drawCount = 1;
+let soundEnabled = true;
+
+// 当前抽中的临时暂存（用于支持弹窗中直接放回）
+let latestDrawnStudents = [];
+
+// 转盘物理运动参数
+let angle = 0;
+let spinningStatus = 'IDLE'; // 'IDLE' | 'RUNNING' | 'STOPPING'
+let spinSpeed = 0;
+let cachedWheel = null;
+
+// 音频上下文 (Web Audio API 合成音效)
+let audioCtx = null;
+
+function initAudio() {
+  if (!audioCtx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) audioCtx = new AudioContext();
+  }
+}
+
+// 提示 Toast
+let toastTimer = null;
+function showToast(text, icon = '✨') {
+  const toast = document.getElementById('toastBox');
+  document.getElementById('toastText').innerText = text;
+  document.getElementById('toastIcon').innerText = icon;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 2200);
+}
+
+// 播放机械棘轮嘀嗒声
+function playTickSound() {
+  if (!soundEnabled) return;
+  initAudio();
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(450 + Math.random() * 80, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.04);
+  } catch (e) {}
+}
+
+// 播放胜利/抽中和弦音效
+function playWinSound() {
+  if (!soundEnabled) return;
+  initAudio();
+  if (!audioCtx) return;
+  const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+  notes.forEach((freq, i) => {
+    setTimeout(() => {
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.5);
+      } catch (e) {}
+    }, i * 100);
+  });
+}
+
+function toggleAudio() {
+  soundEnabled = !soundEnabled;
+  document.getElementById('soundIcon').innerText = soundEnabled ? '🔊' : '🔇';
+  document.getElementById('soundToggleBtn').classList.toggle('active', !soundEnabled);
+  showToast(soundEnabled ? '音效已开启' : '已静音', soundEnabled ? '🔊' : '🔇');
+}
+
+// --- 初始化与本地存储 ---
+const canvas = document.getElementById("wheelCanvas");
+const ctx = canvas.getContext("2d");
+const spinBtn = document.getElementById("spinBtn");
+const pointerNode = document.getElementById("pointerNode");
+
+window.addEventListener('DOMContentLoaded', () => {
+  loadStoredData();
+  setupKeyboardShortcuts();
+  initBackgroundCanvas();
+  initConfettiCanvas();
+  requestAnimationFrame(renderLoop);
+});
+
+function loadStoredData() {
+  const storedClasses = localStorage.getItem('draw_pro_classes');
+  const storedCurrClass = localStorage.getItem('draw_pro_curr_class');
+  const sMod = localStorage.getItem('draw_pro_mod');
+  const sNoRep = localStorage.getItem('draw_pro_norep');
+  const sTTS = localStorage.getItem('draw_pro_tts');
+  const sTheme = localStorage.getItem('draw_pro_theme');
+
+  if (sMod !== null) displayWithNames = JSON.parse(sMod);
+  if (sNoRep !== null) noRepeatMode = JSON.parse(sNoRep);
+  if (sTTS !== null) isTTSEnabled = JSON.parse(sTTS);
+  if (sTheme) switchTheme(sTheme, false);
+
+  document.getElementById('chkShowName').checked = displayWithNames;
+  document.getElementById('chkNoRepeat').checked = noRepeatMode;
+  document.getElementById('chkTTS').checked = isTTSEnabled;
+
+  if (storedClasses) {
+    try {
+      classData = JSON.parse(storedClasses);
+    } catch(e) { classData = {}; }
+  }
+
+  // 默认班级生成 (若无数据)
+  if (!classData['default'] || classData['default'].length === 0) {
+    const defaultList = [];
+    for (let i = 1; i <= 45; i++) {
+      defaultList.push({ value: i.toString(), name: "" });
+    }
+    classData['default'] = defaultList;
+  }
+
+  currentClass = (storedCurrClass && classData[storedCurrClass]) ? storedCurrClass : 'default';
+  updateClassDropdown();
+  loadCurrentClassPool();
+}
+
+function updateClassDropdown() {
+  const select = document.getElementById('classSelect');
+  select.innerHTML = '';
+  Object.keys(classData).forEach(k => {
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.innerText = k === 'default' ? '默认班级 (1-45)' : k;
+    if (k === currentClass) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function switchClassPreset(className) {
+  if (!classData[className]) return;
+  currentClass = className;
+  localStorage.setItem('draw_pro_curr_class', currentClass);
+  loadCurrentClassPool();
+}
+
+function loadCurrentClassPool() {
+  originalItems = [...classData[currentClass]];
+  const storedWin = localStorage.getItem(`draw_pro_win_${currentClass}`);
+  winners = storedWin ? JSON.parse(storedWin) : [];
+  
+  rebuildItemsPool();
+}
+
+// 重新计算并同步待抽池 items (保持原始名单相对顺序)
+function rebuildItemsPool() {
+  const activeStudents = originalItems.filter(s => !s.absent);
+  
+  if (noRepeatMode && winners.length > 0) {
+    const winKeys = new Set(winners.map(w => w.value + ':::' + (w.name || '')));
+    items = activeStudents.filter(s => !winKeys.has(s.value + ':::' + (s.name || '')));
+  } else {
+    items = [...activeStudents];
+  }
+  
+  updateCache();
+  drawWheel();
+  refreshWinnersList();
+}
+
+function saveStorage() {
+  localStorage.setItem('draw_pro_classes', JSON.stringify(classData));
+  localStorage.setItem('draw_pro_curr_class', currentClass);
+  localStorage.setItem(`draw_pro_win_${currentClass}`, JSON.stringify(winners));
+  localStorage.setItem('draw_pro_mod', JSON.stringify(displayWithNames));
+  localStorage.setItem('draw_pro_norep', JSON.stringify(noRepeatMode));
+  localStorage.setItem('draw_pro_tts', JSON.stringify(isTTSEnabled));
+}
+
+function saveConfig() {
+  noRepeatMode = document.getElementById('chkNoRepeat').checked;
+  isTTSEnabled = document.getElementById('chkTTS').checked;
+  drawCount = parseInt(document.getElementById('drawCountSelect').value, 10) || 1;
+  saveStorage();
+  rebuildItemsPool();
+}
+
+function toggleNameDisplay() {
+  displayWithNames = document.getElementById('chkShowName').checked;
+  saveStorage();
+  drawWheel();
+  refreshWinnersList();
+}
+
+function switchTheme(theme, save = true) {
+  if (theme === 'default') {
+    document.body.removeAttribute('data-theme');
+  } else {
+    document.body.setAttribute('data-theme', theme);
+  }
+  document.getElementById('themeSelect').value = theme;
+  if (save) localStorage.setItem('draw_pro_theme', theme);
+}
+
+// --- 模式切换 (转盘 vs 极速) ---
+function setRollMode(mode) {
+  currentMode = mode;
+  document.getElementById('tabWheel').classList.toggle('active', mode === 'wheel');
+  document.getElementById('tabSlot').classList.toggle('active', mode === 'slot');
+  
+  document.getElementById('wheelWrapper').style.display = mode === 'wheel' ? 'flex' : 'none';
+  document.getElementById('slotWrapper').style.display = mode === 'slot' ? 'flex' : 'none';
+}
+
+// --- 转盘绘制优化 (超清高分屏适配 & 鲜明配色) ---
+function updateCache() {
+  if (items.length === 0) {
+    cachedWheel = null;
+    return;
+  }
+  const arc = (2 * Math.PI) / items.length;
+  // 调色盘生成：确保相邻扇形对比鲜明
+  const palette = [
+    '#4facfe', '#00f2fe', '#43e97b', '#38f9d7', '#fa709a',
+    '#fee140', '#30cfd0', '#330867', '#a18cd1', '#fbc2eb',
+    '#f6d365', '#fda085', '#ff0844', '#ffb199', '#667eea'
+  ];
+
+  const sectorColors = items.map((_, i) => {
+    return palette[i % palette.length];
+  });
+
+  cachedWheel = { arc, sectorColors };
+}
+
+let lastTickIndex = -1;
+
+function drawWheel() {
+  const width = canvas.width;
+  const height = canvas.height;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = cx - 18;
+
+  ctx.clearRect(0, 0, width, height);
+
+  if (!cachedWheel || items.length === 0) {
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 28px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(originalItems.length === 0 ? "请先载入名单" : "本轮已抽完，可点击放回", cx, cy);
+    document.getElementById("remainCount").innerText = 0;
+    document.getElementById("totalCount").innerText = originalItems.length;
+    return;
+  }
+
+  const { arc, sectorColors } = cachedWheel;
+  const currentAngleRad = (angle * Math.PI) / 180;
+
+  // 绘制扇形
+  for (let i = 0; i < items.length; i++) {
+    const startAngle = i * arc + currentAngleRad;
+    const endAngle = (i + 1) * arc + currentAngleRad;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, startAngle, endAngle);
+    ctx.fillStyle = sectorColors[i];
+    ctx.fill();
+    ctx.strokeStyle = "rgba(12, 18, 38, 0.4)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 绘制扇形内文字
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((startAngle + endAngle) / 2);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    
+    // 动态字号计算
+    let label = items[i].value;
+    if (displayWithNames && items[i].name) {
+      label = `${items[i].value} ${items[i].name}`;
+    }
+    const fontLen = label.length;
+    let fontSize = items.length > 35 ? 18 : (items.length > 20 ? 22 : 26);
+    if (fontLen > 5 && items.length > 25) fontSize -= 4;
+
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "rgba(0,0,0,0.85)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+    ctx.fillText(label, radius - 30, 0);
+    ctx.restore();
+  }
+
+  // 检查指针当前经过的分区触发音效与动画
+  const pointerAngle = (360 - ((angle + 90) % 360) + 360) % 360;
+  const currentIndex = Math.floor((pointerAngle / 360) * items.length);
+  if (currentIndex !== lastTickIndex && spinningStatus === 'RUNNING') {
+    lastTickIndex = currentIndex;
+    playTickSound();
+    pointerNode.classList.remove('ticking');
+    void pointerNode.offsetWidth; // 触发重绘
+    pointerNode.classList.add('ticking');
+  }
+
+  document.getElementById("remainCount").innerText = items.length;
+  document.getElementById("totalCount").innerText = originalItems.length;
+}
+
+// --- 抽奖动画逻辑 ---
+let slotInterval = null;
+
+function handleSpinClick() {
+  initAudio();
+  if (items.length === 0) {
+    if (originalItems.length > 0) {
+      if (confirm("本轮待抽池已全部抽完！是否将已抽取的同学全部放回待抽池？")) {
+        restoreAllWinners();
+      }
+    } else {
+      openImportModal();
+    }
+    return;
+  }
+
+  if (currentMode === 'wheel') {
+    if (spinningStatus === 'IDLE') {
+      spinningStatus = 'RUNNING';
+      spinBtn.classList.add('running');
+      document.getElementById('btnMainText').innerText = 'STOP';
+      document.getElementById('btnSubText').innerText = '点击减速';
+      spinSpeed = 18;
+    } else if (spinningStatus === 'RUNNING') {
+      spinningStatus = 'STOPPING';
+      spinBtn.classList.remove('running');
+      spinBtn.classList.add('disabled');
+      document.getElementById('btnMainText').innerText = 'WAIT';
+      document.getElementById('btnSubText').innerText = '停驻中...';
+      startWheelDeceleration();
+    }
+  } else {
+    // 极速点名模式 (Slot)
+    if (spinningStatus === 'IDLE') {
+      spinningStatus = 'RUNNING';
+      const slotBtn = document.getElementById('slotStartBtn');
+      slotBtn.innerText = '🛑 停！(Space)';
+      slotBtn.style.background = 'linear-gradient(135deg, #ff416c, #ff4b2b)';
+      
+      slotInterval = setInterval(() => {
+        const randItem = items[Math.floor(Math.random() * items.length)];
+        document.getElementById('slotCardNum').innerText = randItem.value + ' 号';
+        document.getElementById('slotCardName').innerText = (displayWithNames && randItem.name) ? randItem.name : '学生';
+        playTickSound();
+      }, 50);
+    } else if (spinningStatus === 'RUNNING') {
+      clearInterval(slotInterval);
+      spinningStatus = 'IDLE';
+      const slotBtn = document.getElementById('slotStartBtn');
+      slotBtn.innerText = '🎲 开始点名 (Space)';
+      slotBtn.style.background = '';
+      
+      // 决定中奖者
+      finishDrawProcess();
+    }
+  }
+}
+
+function renderLoop() {
+  if (spinningStatus === 'RUNNING' && currentMode === 'wheel') {
+    angle = (angle + spinSpeed) % 360;
+    drawWheel();
+  }
+  requestAnimationFrame(renderLoop);
+}
+
+function startWheelDeceleration() {
+  const winnerIndex = Math.floor(Math.random() * items.length);
+  const arcDeg = 360 / items.length;
+  // 计算目标角度，使中奖扇形对准正上方指针 (指针在 -90度)
+  let targetAngle = -90 - (winnerIndex * arcDeg + arcDeg / 2);
+  targetAngle = ((targetAngle % 360) + 360) % 360;
+  
+  const startA = angle;
+  const rounds = 3 + Math.floor(Math.random() * 2); // 额外转3-4圈
+  const finalA = targetAngle + 360 * rounds + (targetAngle < (angle % 360) ? 360 : 0);
+  
+  let startTime = null;
+  const duration = 3800; // 毫秒
+
+  function animateSlow(time) {
+    if (!startTime) startTime = time;
+    let progress = (time - startTime) / duration;
+    if (progress > 1) progress = 1;
+    
+    // 三次方减速缓动
+    const ease = 1 - Math.pow(1 - progress, 3);
+    angle = startA + (finalA - startA) * ease;
+    drawWheel();
+
+    if (progress < 1) {
+      requestAnimationFrame(animateSlow);
+    } else {
+      spinningStatus = 'IDLE';
+      spinBtn.classList.remove('disabled');
+      document.getElementById('btnMainText').innerText = 'START';
+      document.getElementById('btnSubText').innerText = '空格键';
+      finishDrawProcess(winnerIndex);
+    }
+  }
+  requestAnimationFrame(animateSlow);
+}
+
+// 抽取完成统一结算与连抽分发
+function finishDrawProcess(primaryWinIdx = -1) {
+  let drawnWinners = [];
+  const countToDraw = Math.min(drawCount, items.length);
+
+  if (countToDraw === 1) {
+    const idx = primaryWinIdx >= 0 ? primaryWinIdx : Math.floor(Math.random() * items.length);
+    drawnWinners.push({ item: items[idx], index: idx });
+  } else {
+    // 连抽多名学生 (保证单次抽取不重复)
+    const shuffledIndices = items.map((_, i) => i).sort(() => Math.random() - 0.5);
+    for (let k = 0; k < countToDraw; k++) {
+      const idx = shuffledIndices[k];
+      drawnWinners.push({ item: items[idx], index: idx });
+    }
+  }
+
+  // 记录本次中奖者
+  latestDrawnStudents = drawnWinners.map(w => w.item);
+
+  // 播放音效与烟花
+  playWinSound();
+  launchConfetti();
+
+  // 显示弹窗与播报
+  showWinnerCelebration(latestDrawnStudents);
+
+  // 移出待抽池并记入已抽取列表
+  drawnWinners.forEach(w => {
+    winners.push({
+      value: w.item.value,
+      name: w.item.name,
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    });
+  });
+
+  saveStorage();
+  rebuildItemsPool();
+}
+
+// --- 祝贺弹窗与语音合成 ---
+function showWinnerCelebration(wonList) {
+  const overlay = document.getElementById('winnerOverlay');
+  const singleBox = document.getElementById('singleWinnerBox');
+  const multiBox = document.getElementById('multiWinnerBox');
+  const multiGrid = document.getElementById('multiWinnerGrid');
+
+  if (wonList.length === 1) {
+    singleBox.style.display = 'block';
+    multiBox.style.display = 'none';
+    document.getElementById('bigWinnerVal').innerText = wonList[0].value + ' 号';
+    document.getElementById('bigWinnerName').innerText = (displayWithNames && wonList[0].name) ? wonList[0].name : '请回答';
+  } else {
+    singleBox.style.display = 'none';
+    multiBox.style.display = 'block';
+    multiGrid.innerHTML = wonList.map(w => `
+      <div class="multi-winner-item">
+        <div style="color:var(--accent-gold);font-size:12px;">${w.value} 号</div>
+        <div style="font-size:16px;">${(displayWithNames && w.name) ? w.name : ''}</div>
+      </div>
+    `).join('');
+  }
+
+  overlay.classList.add('active');
+
+  // TTS 语音朗读
+  if (isTTSEnabled && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    let speechText = "";
+    if (wonList.length === 1) {
+      const w = wonList[0];
+      speechText = (displayWithNames && w.name) ? `请 ${w.value}号 ${w.name} 同学回答问题` : `请 ${w.value}号 同学回答问题`;
+    } else {
+      speechText = `请 ` + wonList.map(w => (displayWithNames && w.name) ? `${w.value}号 ${w.name}` : `${w.value}号`).join('，') + ` 同学组队回答`;
+    }
+    const utterance = new SpeechSynthesisUtterance(speechText);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 1.05;
+    utterance.pitch = 1.1;
+    window.speechSynthesis.speak(utterance);
+  }
+}
+
+function closeWinnerModal(e) {
+  document.getElementById('winnerOverlay').classList.remove('active');
+}
+
+function addScoreToWinner(point) {
+  showToast(`已为同学记录表现优秀 +${point}！`, '⭐');
+  closeWinnerModal();
+}
+
+// 弹窗中一键撤销并放回当前抽中的同学
+function putBackCurrentWinner() {
+  if (latestDrawnStudents.length === 0) {
+    closeWinnerModal();
+    return;
+  }
+  // 从 winners 尾部移除对应的抽取记录
+  latestDrawnStudents.forEach(st => {
+    const idx = winners.findLastIndex(w => w.value === st.value && (w.name || '') === (st.name || ''));
+    if (idx !== -1) winners.splice(idx, 1);
+  });
+  
+  saveStorage();
+  rebuildItemsPool();
+  closeWinnerModal();
+  showToast(`已将刚刚抽中的同学放回待抽转盘！`, '↩️');
+}
+
+// --- 放回已抽学生核心功能 (单个放回 & 全部放回) ---
+
+// 单个放回指定位置的已抽中同学
+function restoreWinnerAt(index) {
+  if (index < 0 || index >= winners.length) return;
+  const target = winners[index];
+  winners.splice(index, 1);
+  saveStorage();
+  rebuildItemsPool();
+  
+  const displayName = target.name ? `${target.value}号 ${target.name}` : `${target.value}号`;
+  showToast(`已将 [${displayName}] 放回待抽名单`, '↩️');
+}
+
+// 全部放回
+function restoreAllWinners(confirmDialog = true) {
+  if (winners.length === 0) {
+    showToast("当前没有已抽中的同学记录", "ℹ️");
+    return;
+  }
+  if (!confirmDialog || confirm(`确定将已点名的 ${winners.length} 位同学全部放回待抽池吗？`)) {
+    winners = [];
+    saveStorage();
+    rebuildItemsPool();
+    showToast("已将所有同学全部放回待抽名单！", "🎉");
+    if (document.getElementById('rosterModal').classList.contains('active')) {
+      openRosterModal();
+    }
+  }
+}
+
+// --- 历史榜单刷新与导出 ---
+function refreshWinnersList() {
+  const container = document.getElementById("winnersContainer");
+  document.getElementById("winnerCount").innerText = winners.length;
+
+  if (winners.length === 0) {
+    container.innerHTML = '<div class="empty-tip">暂无已点名记录，点击 START 开始点名吧！</div>';
+    return;
+  }
+
+  // 倒序展示最新抽取的在最前，并且带独立的“放回”按钮
+  container.innerHTML = winners.map((w, originalIdx) => {
+    const showName = (displayWithNames && w.name) ? w.name : '';
+    return `
+      <div class="winner-card">
+        <div class="winner-card-info">
+          <span class="w-num">${w.value}号</span>
+          <span class="w-name" title="${showName || ''}">${showName || '已抽取'}</span>
+        </div>
+        <div class="winner-card-bottom">
+          <span class="w-time">${w.time || ''}</span>
+          <button class="btn-restore-single" onclick="restoreWinnerAt(${originalIdx})" title="将该同学放回待抽池">
+            <span>↩️ 放回</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }).reverse().join('');
+}
+
+function exportHistory() {
+  if (winners.length === 0) {
+    alert("暂无点名记录可复制！");
+    return;
+  }
+  const text = winners.map((w, i) => `${i + 1}. [${w.time || ''}] ${w.value}号 ${w.name}`).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    showToast("已复制点名记录到剪贴板！", "📋");
+  }).catch(() => {
+    prompt("请手动复制下方点名记录：", text);
+  });
+}
+
+function clearHistoryRecords() {
+  if (winners.length === 0) return;
+  if (confirm("确定要彻底清空历史记录吗？（清空后所有同学将重新参与抽取）")) {
+    winners = [];
+    saveStorage();
+    rebuildItemsPool();
+    showToast("已清空历史记录并重置待抽池", "🗑️");
+  }
+}
+
+function resetRound() {
+  if (originalItems.length === 0) return;
+  restoreAllWinners(false);
+}
+
+// --- 名单导入与解析 ---
+function openImportModal() {
+  const textarea = document.getElementById('importTextarea');
+  if (originalItems.length > 0) {
+    textarea.value = originalItems.map(it => it.name ? `${it.value} ${it.name}` : it.value).join('\n');
+  } else {
+    textarea.value = '1-45';
+  }
+  document.getElementById('classNameInput').value = currentClass === 'default' ? '' : currentClass;
+  document.getElementById('importModal').classList.add('active');
+}
+
+function closeModals() {
+  document.querySelectorAll('.modal-backdrop').forEach(m => m.classList.remove('active'));
+}
+
+function confirmImport() {
+  const text = document.getElementById('importTextarea').value;
+  const customClassName = document.getElementById('classNameInput').value.trim();
+  const parsed = parseStudentText(text);
+
+  if (parsed.length === 0) {
+    alert("未能解析出有效名单，请检查输入格式！");
+    return;
+  }
+
+  const targetClass = customClassName || (currentClass === 'default' ? 'default' : currentClass);
+  classData[targetClass] = parsed;
+  currentClass = targetClass;
+
+  updateClassDropdown();
+  loadCurrentClassPool();
+  closeModals();
+  showToast(`成功导入 ${parsed.length} 名学生并应用！`, "✅");
+}
+
+function parseStudentText(text) {
+  const trimmed = text.trim();
+  let result = [];
+
+  // 情况 1: 纯数字范围 1-50
+  const rangeMatch = trimmed.match(/^(\d+)[-~至到](\d+)$/);
+  if (rangeMatch) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+    for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
+      result.push({ value: i.toString(), name: "" });
+    }
+    return result;
+  }
+
+  // 情况 2: 多行文本
+  const lines = trimmed.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+  lines.forEach((line, idx) => {
+    const parts = line.split(/[\s,，\t]+/);
+    if (parts.length >= 2) {
+      result.push({ value: parts[0], name: parts.slice(1).join(' ') });
+    } else {
+      if (/^\d+$/.test(parts[0])) {
+        result.push({ value: parts[0], name: "" });
+      } else {
+        result.push({ value: (idx + 1).toString(), name: parts[0] });
+      }
+    }
+  });
+
+  return result;
+}
+
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const content = e.target.result;
+    const parsed = parseStudentText(content);
+    if (parsed.length > 0) {
+      const clsName = file.name.replace(/\.[^/.]+$/, "");
+      classData[clsName] = parsed;
+      currentClass = clsName;
+      updateClassDropdown();
+      loadCurrentClassPool();
+      showToast(`已导入 [${clsName}] 共 ${parsed.length} 人！`, "📂");
+    } else {
+      alert("文件解析失败，请确保文件内容为：序号 姓名 (每行一位)");
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// --- 请假与出勤管理抽屉 ---
+function openRosterModal() {
+  const container = document.getElementById('rosterCheckContainer');
+  const winKeys = new Set(winners.map(w => w.value + ':::' + (w.name || '')));
+
+  container.innerHTML = originalItems.map((s, idx) => {
+    const isDrawn = noRepeatMode && winKeys.has(s.value + ':::' + (s.name || ''));
+    return `
+      <div class="roster-item ${isDrawn ? 'drawn' : 'active-pool'}">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;">
+          <input type="checkbox" ${s.absent ? '' : 'checked'} onchange="toggleStudentAbsent(${idx}, this.checked)">
+          <span>${s.value} ${s.name || ''}</span>
+        </label>
+        ${isDrawn ? `
+          <button class="btn-restore-single" style="margin-left:auto;" onclick="restoreWinnerByKey('${s.value}', '${s.name || ''}')">
+            ↩️ 放回
+          </button>
+        ` : `
+          <span class="roster-tag ${s.absent ? '' : 'inpool-tag'}">${s.absent ? '请假' : '待抽'}</span>
+        `}
+      </div>
+    `;
+  }).join('');
+  document.getElementById('rosterModal').classList.add('active');
+}
+
+function restoreWinnerByKey(val, name) {
+  const idx = winners.findLastIndex(w => w.value === val && (w.name || '') === name);
+  if (idx !== -1) {
+    restoreWinnerAt(idx);
+    openRosterModal(); // 刷新抽屉视图
+  }
+}
+
+function toggleStudentAbsent(idx, isPresent) {
+  originalItems[idx].absent = !isPresent;
+  saveStorage();
+  rebuildItemsPool();
+}
+
+function checkAllRoster(val) {
+  originalItems.forEach(s => s.absent = !val);
+  saveStorage();
+  rebuildItemsPool();
+  openRosterModal();
+}
+
+// --- 键盘快捷键绑定 ---
+function setupKeyboardShortcuts() {
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
+      handleSpinClick();
+    } else if (e.code === 'Enter') {
+      if (document.getElementById('winnerOverlay').classList.contains('active')) {
+        closeWinnerModal();
+      }
+    } else if (e.key.toLowerCase() === 'f') {
+      toggleFullscreen();
+    } else if (e.key.toLowerCase() === 'm') {
+      toggleAudio();
+    } else if (e.key.toLowerCase() === 'r') {
+      resetRound();
+    } else if (e.code === 'Escape') {
+      closeModals();
+      closeWinnerModal();
+    }
+  });
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().then(() => {
+      document.body.classList.add('fullscreen-mode');
+    }).catch(() => {});
+  } else {
+    document.exitFullscreen().then(() => {
+      document.body.classList.remove('fullscreen-mode');
+    }).catch(() => {});
+  }
+}
+
+// --- 背景星光流光粒子系统 ---
+function initBackgroundCanvas() {
+  const bgCanvas = document.getElementById('bgCanvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  let w = bgCanvas.width = window.innerWidth;
+  let h = bgCanvas.height = window.innerHeight;
+
+  window.addEventListener('resize', () => {
+    w = bgCanvas.width = window.innerWidth;
+    h = bgCanvas.height = window.innerHeight;
+  });
+
+  const particles = Array.from({ length: 45 }, () => ({
+    x: Math.random() * w,
+    y: Math.random() * h,
+    radius: Math.random() * 2 + 0.5,
+    vx: (Math.random() - 0.5) * 0.4,
+    vy: (Math.random() - 0.5) * 0.4,
+    alpha: Math.random() * 0.5 + 0.2
+  }));
+
+  function anim() {
+    bgCtx.clearRect(0, 0, w, h);
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0) p.x = w;
+      if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h;
+      if (p.y > h) p.y = 0;
+
+      bgCtx.beginPath();
+      bgCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      bgCtx.fillStyle = `rgba(0, 242, 254, ${p.alpha})`;
+      bgCtx.fill();
+    });
+    requestAnimationFrame(anim);
+  }
+  anim();
+}
+
+// --- 烟花纸屑 Confetti 引擎 ---
+let confettiActive = false;
+let confettiParticles = [];
+
+function initConfettiCanvas() {
+  const cCanvas = document.getElementById('confettiCanvas');
+  const cCtx = cCanvas.getContext('2d');
+  cCanvas.width = window.innerWidth;
+  cCanvas.height = window.innerHeight;
+
+  window.addEventListener('resize', () => {
+    cCanvas.width = window.innerWidth;
+    cCanvas.height = window.innerHeight;
+  });
+
+  function renderConfetti() {
+    if (!confettiActive && confettiParticles.length === 0) {
+      cCtx.clearRect(0, 0, cCanvas.width, cCanvas.height);
+      requestAnimationFrame(renderConfetti);
+      return;
+    }
+
+    cCtx.clearRect(0, 0, cCanvas.width, cCanvas.height);
+    for (let i = confettiParticles.length - 1; i >= 0; i--) {
+      const p = confettiParticles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += p.gravity;
+      p.rotation += p.rotSpeed;
+      p.opacity -= 0.008;
+
+      if (p.opacity <= 0 || p.y > cCanvas.height) {
+        confettiParticles.splice(i, 1);
+        continue;
+      }
+
+      cCtx.save();
+      cCtx.translate(p.x, p.y);
+      cCtx.rotate(p.rotation);
+      cCtx.fillStyle = p.color;
+      cCtx.globalAlpha = p.opacity;
+      cCtx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+      cCtx.restore();
+    }
+    requestAnimationFrame(renderConfetti);
+  }
+  renderConfetti();
+}
+
+function launchConfetti() {
+  const colors = ['#ff007f', '#00f2fe', '#ffd200', '#00f5a0', '#ff4b2b', '#7f00ff', '#ffffff'];
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  for (let i = 0; i < 90; i++) {
+    confettiParticles.push({
+      x: w / 2 + (Math.random() - 0.5) * 80,
+      y: h * 0.45,
+      size: Math.random() * 10 + 6,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      vx: (Math.random() - 0.5) * 16,
+      vy: Math.random() * -14 - 4,
+      gravity: 0.35,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.2,
+      opacity: 1
+    });
+  }
+  confettiActive = true;
+  setTimeout(() => { confettiActive = false; }, 2500);
+}
+</script>
+</body>
+</html>

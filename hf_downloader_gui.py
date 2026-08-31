@@ -3308,7 +3308,12 @@ class QueueTask:
         return task
 
 
-class HFDownloaderApp(tk.Tk):
+class HFDownloaderView(ttk.Frame):
+    def after(self, ms, func=None, *args):
+        if self.is_embedded and self.master_container:
+            return self.master_container.after(ms, func, *args)
+        return super().after(ms, func, *args)
+
     # ------------------ Centered Modal Dialog Helpers ------------------
     def show_info(self, title: str, msg: str):
         messagebox.showinfo(title, msg, parent=self)
@@ -3325,18 +3330,9 @@ class HFDownloaderApp(tk.Tk):
     def ask_yes_no_cancel(self, title: str, msg: str, **kwargs):
         return messagebox.askyesnocancel(title, msg, parent=self, **kwargs)
 
-    def __init__(self):
-        super().__init__()
-        self.title("🚀 Hugging Face 批量与断点续传极速下载器 (HF Explorer & Queue Manager)")
-        self.minsize(940, 680)
-
-        # Center main window on screen
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        ww, wh = 1220, 880
-        x = max(20, (sw - ww) // 2)
-        y = max(20, (sh - wh) // 2)
-        self.geometry(f"{ww}x{wh}+{x}+{y}")
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master_window = self.winfo_toplevel()
 
         # Style & Font configuration
         self.style = ttk.Style(self)
@@ -3370,7 +3366,12 @@ class HFDownloaderApp(tk.Tk):
         self.stop_queue_requested = False
         self.active_task_id: Optional[int] = None
 
-        self.protocol("WM_DELETE_WINDOW", self._on_window_closing)
+        try:
+            top = self.winfo_toplevel()
+            if isinstance(top, tk.Tk):
+                top.protocol("WM_DELETE_WINDOW", self._on_window_closing)
+        except Exception:
+            pass
 
         self._load_saved_settings()
         self._load_saved_mirrors()
@@ -7172,6 +7173,28 @@ class HFDownloaderApp(tk.Tk):
 
         if total_count > 0 and done_count == total_count:
             messagebox.showinfo("队列完成", f"队列中的所有 {total_count} 个任务已全部下载完成！", parent=self)
+
+
+
+class HFDownloaderApp(tk.Tk):
+    """Standalone TopLevel Window Launcher for HFDownloader."""
+    def __init__(self):
+        super().__init__()
+        self.title("🚀 Hugging Face 批量与断点续传极速下载器 (HF Explorer & Queue Manager)")
+        self.minsize(940, 680)
+
+        # Center main window on screen
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        ww, wh = 1220, 880
+        x = max(20, (sw - ww) // 2)
+        y = max(20, (sh - wh) // 2)
+        self.geometry(f"{ww}x{wh}+{x}+{y}")
+
+        self.view = HFDownloaderView(self)
+        self.view.pack(fill=tk.BOTH, expand=True)
+        self.protocol("WM_DELETE_WINDOW", self.view._on_window_closing)
+
 
 if __name__ == "__main__":
     app = HFDownloaderApp()

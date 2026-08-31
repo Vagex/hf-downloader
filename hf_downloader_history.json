@@ -1,0 +1,154 @@
+{
+  "history": [
+    {
+      "repo_id": "sepiablue-ai/minimax_h3_workflows",
+      "platform": "github",
+      "repo_type": "github",
+      "branch": "main",
+      "file_count": 9,
+      "last_accessed": "2026-08-29 10:10",
+      "is_starred": false,
+      "note": "MiniMax H3 工作流全套"
+    },
+    {
+      "repo_id": "sgyno09-source/reference-video-director",
+      "platform": "github",
+      "repo_type": "github",
+      "branch": "main",
+      "file_count": 6,
+      "last_accessed": "2026-08-29 12:28",
+      "is_starred": false,
+      "note": "Reference Video Director 是一个面向参考图驱动视频创作的 Agent Skill。"
+    },
+    {
+      "repo_id": "comfyanonymous/ComfyUI",
+      "platform": "github",
+      "repo_type": "github",
+      "branch": "master",
+      "file_count": 142,
+      "last_accessed": "2026-08-30 01:36",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "AIMixer/ComfyUI_MiniMaxH3_Director",
+      "platform": "github",
+      "repo_type": "github",
+      "branch": "main",
+      "file_count": 74,
+      "last_accessed": "2026-08-30 01:39",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "[🎬 Youtube] @@democratictaiwanchannel / eZVmenCydGE",
+      "platform": "twitter",
+      "repo_type": "universal",
+      "branch": "video",
+      "file_count": 50,
+      "last_accessed": "2026-08-30 13:10",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "[📁 夸克网盘 (Quark Pan)] 分享ID: cbb00603f2c8 / cbb00603f2c8",
+      "platform": "twitter",
+      "repo_type": "quark",
+      "branch": "video",
+      "file_count": 34,
+      "last_accessed": "2026-08-30 21:36",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "[🧲 磁力链接 (BitTorrent)] Trackers: 12个 / 20B62855D8E7637AF55AE610793AEE2E6F705A6A",
+      "platform": "twitter",
+      "repo_type": "magnet",
+      "branch": "video",
+      "file_count": 1,
+      "last_accessed": "2026-08-30 21:44",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "[🧲 磁力链接 (BitTorrent)] Trackers: 24个 / CB4890C963AAA36395267F34889C241E33313CCD",
+      "platform": "twitter",
+      "repo_type": "magnet",
+      "branch": "video",
+      "file_count": 1,
+      "last_accessed": "2026-08-30 22:14",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "Kijai/MiniMax-H3-experimental",
+      "platform": "huggingface",
+      "repo_type": "model",
+      "branch": "main",
+      "file_count": 13,
+      "last_accessed": "2026-08-31 08:36",
+      "is_starred": false,
+      "note": "MiniMax 官方实验模型"
+    },
+    {
+      "repo_id": "Lightricks/LTX-2.5",
+      "platform": "huggingface",
+      "repo_type": "model",
+      "branch": "main",
+      "file_count": 17,
+      "last_accessed": "2026-08-31 08:42",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "[🐦 Twitter / X] @OdinLovis / 2093778420610338961",
+      "platform": "twitter",
+      "repo_type": "twitter",
+      "branch": "video",
+      "file_count": 5,
+      "last_accessed": "2026-08-31 09:01",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "lovis93/studio-1939-old-animation-lora-minimax-h3",
+      "platform": "huggingface",
+      "repo_type": "model",
+      "branch": "main",
+      "file_count": 19,
+      "last_accessed": "2026-08-31 09:04",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "t8star/Minimax-H3-Super-Acceleration-Comfy",
+      "platform": "huggingface",
+      "repo_type": "model",
+      "branch": "main",
+      "file_count": 8,
+      "last_accessed": "2026-08-31 09:05",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "Comfy-Org/MiniMax-H3",
+      "platform": "huggingface",
+      "repo_type": "model",
+      "branch": "main",
+      "file_count": 30,
+      "last_accessed": "2026-08-31 21:44",
+      "is_starred": false,
+      "note": ""
+    },
+    {
+      "repo_id": "Hippotes/MiniMax-H3-Experiments",
+      "platform": "huggingface",
+      "repo_type": "model",
+      "branch": "main",
+      "file_count": 3,
+      "last_accessed": "2026-09-01 00:15",
+      "is_starred": false,
+      "note": ""
+    }
+  ]
+}

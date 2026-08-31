@@ -1,0 +1,11 @@
+{
+  "🧩 ComfyUI 插件目录 (custom_nodes)": "F:\\ComfyUI-aki-v3\\ComfyUI\\custom_nodes",
+  "🎨 扩散模型 (diffusion_models)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\diffusion_models",
+  "🎮 控制网络 (controlnet)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\controlnet",
+  "💾 大模型底模 (checkpoints)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\checkpoints",
+  "⚡ 微调模型 (loras)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\loras",
+  "🔍 变分自编码 (vae)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\vae",
+  "🧠 UNet 主干 (unet)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\unet",
+  "🔤 文本编码器 (clip)": "F:\\ComfyUI-aki-v3\\ComfyUI\\models\\clip",
+  "📥 视频集汇 (Twitter)": "D:\\myVideos"
+}

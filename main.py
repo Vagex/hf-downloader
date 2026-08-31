@@ -1,0 +1,22 @@
+import os
+import sys
+
+# Ensure root directory is on PYTHONPATH
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import modules to register them with ModuleManager
+import app.modules.downloader.module
+import app.modules.media_tools.module
+import app.modules.settings.module
+
+from app.ui.main_window import MainWindow
+
+def main():
+    print("=======================================================")
+    print(" 🌟 启动万能超级工具箱平台 (Universal Super App v2.0)")
+    print("=======================================================")
+    app = MainWindow()
+    app.mainloop()
+
+if __name__ == "__main__":
+    main()
