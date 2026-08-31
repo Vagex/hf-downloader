@@ -496,10 +496,15 @@ class Aria2Manager:
                 if not line_s:
                     continue
 
-                if "Download complete" in line_s or "download completed" in line_s.lower():
-                    success = True
-                    if log_callback:
-                        log_callback("[✓] 磁力资源 P2P 数据传输全部完成！")
+                # Only mark complete for real payload, NOT the initial metadata handshake
+                if ("Download complete" in line_s or "download completed" in line_s.lower()):
+                    if "[METADATA]" in line_s or line_s.endswith(".torrent"):
+                        if log_callback:
+                            log_callback("⚡ [元数据已就绪] 种子元数据解析完成，正式开启多文件极速 P2P 数据传输...")
+                    else:
+                        success = True
+                        if log_callback:
+                            log_callback("[✓] 磁力资源 P2P 数据传输全部完成！")
 
                 m = prog_pattern.search(line_s)
                 if m:
@@ -545,6 +550,15 @@ class Aria2Manager:
 
         if success and task:
             task.progress = 100.0
+            # Auto clean residual .aria2 control files in destination
+            try:
+                for root, _, files in os.walk(dest_dir):
+                    for fn in files:
+                        if fn.endswith(".aria2") or fn.endswith(".meta4"):
+                            try: os.remove(os.path.join(root, fn))
+                            except Exception: pass
+            except Exception:
+                pass
         return success
 
 class UniversalMediaResolver:
