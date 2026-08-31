@@ -3597,9 +3597,18 @@ class HFDownloaderView(ttk.Frame):
             self.tw_url_combo["values"] = HistoryManager.get_recent_repos("twitter")
 
     def open_env_setup(self):
-        self.notebook.select(4)
-        self._check_tab_env_status()
-        self._refresh_tab_env_dirs()
+        try:
+            top = self.winfo_toplevel()
+            if hasattr(top, "switch_to_module"):
+                top.switch_to_module("settings")
+                # Select Tab 2 in settings module
+                mod = top.active_module
+                if hasattr(mod, "notebook"):
+                    mod.notebook.select(1)
+                return
+        except Exception:
+            pass
+        messagebox.showinfo("环境部署", "全局依赖与环境部署已迁移至主工作台【⚙️ 全局设置与环境部署】模块中！", parent=self)
 
     def _on_env_setup_completed(self):
         global HfApi
@@ -3682,15 +3691,10 @@ class HFDownloaderView(ttk.Frame):
         self.tab_queue = ttk.Frame(self.notebook, padding="6")
         self.notebook.add(self.tab_queue, text=" 📑 统一下载队列 (0) ")
 
-        # Tab 5: Environment Setup & Directory Manager
-        self.tab_env = ttk.Frame(self.notebook, padding="6")
-        self.notebook.add(self.tab_env, text=" 🛠️ 一键部署环境 ")
-
         self._build_tab_browse()
         self._build_tab_github()
         self._build_tab_twitter()
         self._build_tab_queue()
-        self._build_tab_env()
         self._build_bottom_panel(main_frame)
 
     # ------------------ Tab 1: Dual-Pane File Browser with Checkbox UI ------------------
