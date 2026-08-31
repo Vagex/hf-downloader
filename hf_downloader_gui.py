@@ -3309,11 +3309,6 @@ class QueueTask:
 
 
 class HFDownloaderView(ttk.Frame):
-    def after(self, ms, func=None, *args):
-        if self.is_embedded and self.master_container:
-            return self.master_container.after(ms, func, *args)
-        return super().after(ms, func, *args)
-
     # ------------------ Centered Modal Dialog Helpers ------------------
     def show_info(self, title: str, msg: str):
         messagebox.showinfo(title, msg, parent=self)
