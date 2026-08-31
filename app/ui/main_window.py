@@ -10,6 +10,22 @@ from app.core.context import AppContext
 from app.core.event_bus import EventBus
 from app.modules.base import ModuleManager, BaseAppModule
 
+class StdoutRedirector:
+    """Redirects sys.stdout and sys.stderr to the GUI live log drawer."""
+    def __init__(self, log_callback):
+        self.log_callback = log_callback
+
+    def write(self, text):
+        if text:
+            try:
+                self.log_callback(text)
+            except Exception:
+                pass
+
+    def flush(self):
+        pass
+
+
 class MainWindow(tk.Tk):
     """Main Workbench window for the Universal Super App Platform."""
     def __init__(self):
@@ -22,10 +38,13 @@ class MainWindow(tk.Tk):
         self.context = AppContext(self)
         self.module_views: Dict[str, tk.Widget] = {}
         self.active_module: Optional[BaseAppModule] = None
+        self.is_terminal_visible: bool = False
+        self.auto_scroll_terminal: bool = True
 
         self._build_workbench()
         self._init_modules()
         self._bind_events()
+        self._setup_stdout_redirect()
         self.protocol("WM_DELETE_WINDOW", self._on_window_closing)
 
     def _build_workbench(self):
@@ -33,7 +52,7 @@ class MainWindow(tk.Tk):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(1, weight=1)
 
-        # 1. Top Header Control Bar (Clean Breadcrumb & Fast Proxy Switcher)
+        # 1. Top Header Control Bar
         top_bar = tk.Frame(self, height=44, bg=Theme.BG_CARD, bd=0, relief=tk.FLAT)
         top_bar.grid(row=0, column=0, columnspan=2, sticky="ew")
         
@@ -59,9 +78,13 @@ class MainWindow(tk.Tk):
         )
         self.lbl_global_status.pack(side=tk.LEFT, padx=6)
 
-        # Right header quick tools
-        btn_feedback = ttk.Button(top_bar, text=" 💡 更多功能扩展...", command=self._show_future_roadmap)
+        # Right header tools
+        btn_feedback = ttk.Button(top_bar, text=" 💡 更多扩展...", command=self._show_future_roadmap)
         btn_feedback.pack(side=tk.RIGHT, padx=(4, 12), pady=6)
+
+        # Toggle Terminal Drawer Button
+        self.btn_toggle_terminal = ttk.Button(top_bar, text=" 📜 显示实时终端 ", command=self.toggle_terminal_drawer)
+        self.btn_toggle_terminal.pack(side=tk.RIGHT, padx=4, pady=6)
 
         # Quick Proxy indicator on the top right
         self.var_top_proxy = tk.StringVar(value=self.context.config.get("proxy", "直连"))
@@ -83,13 +106,23 @@ class MainWindow(tk.Tk):
         self.sidebar = Sidebar(self, on_module_selected=self.switch_to_module, width=220)
         self.sidebar.grid(row=1, column=0, sticky="nsew")
 
-        # 3. Right Main Content Dynamic Workspace
-        self.workspace_frame = tk.Frame(self, bg=Theme.BG_LIGHT)
-        self.workspace_frame.grid(row=1, column=1, sticky="nsew")
+        # 3. Right Main Area (Split into Workspace + Collapsible Terminal Drawer)
+        right_main_container = tk.Frame(self, bg=Theme.BG_LIGHT)
+        right_main_container.grid(row=1, column=1, sticky="nsew")
+        right_main_container.columnconfigure(0, weight=1)
+        right_main_container.rowconfigure(0, weight=1)
+
+        # Dynamic Workspace Frame
+        self.workspace_frame = tk.Frame(right_main_container, bg=Theme.BG_LIGHT)
+        self.workspace_frame.grid(row=0, column=0, sticky="nsew")
         self.workspace_frame.columnconfigure(0, weight=1)
         self.workspace_frame.rowconfigure(0, weight=1)
 
-        # Bottom StatusBar
+        # Collapsible Live Terminal Drawer Frame (Initially not packed/hidden)
+        self.terminal_drawer = tk.Frame(right_main_container, height=220, bg="#181818", relief=tk.SUNKEN, bd=1)
+        self._build_terminal_drawer(self.terminal_drawer)
+
+        # 4. Bottom StatusBar
         status_bar = tk.Frame(self, height=24, bg=Theme.BG_SIDEBAR)
         status_bar.grid(row=2, column=0, columnspan=2, sticky="ew")
 
@@ -101,6 +134,159 @@ class MainWindow(tk.Tk):
             fg=Theme.TEXT_MUTED
         )
         self.lbl_bottom_info.pack(side=tk.LEFT, padx=8, pady=2)
+
+        self.btn_bottom_term = tk.Button(
+            status_bar,
+            text="📜 终端日志: [收起]",
+            font=Theme.FONT_SMALL,
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            bg=Theme.BG_SIDEBAR,
+            fg=Theme.PRIMARY,
+            command=self.toggle_terminal_drawer
+        )
+        self.btn_bottom_term.pack(side=tk.RIGHT, padx=8, pady=1)
+
+    def _build_terminal_drawer(self, parent):
+        # Header bar of terminal drawer
+        header = tk.Frame(parent, bg="#252526", height=28)
+        header.pack(fill=tk.X)
+
+        lbl_title = tk.Label(
+            header, 
+            text=" 🖥️ 实时运行终端输出 (Live Console)", 
+            font=("Segoe UI", 9, "bold"), 
+            bg="#252526", 
+            fg="#cccccc"
+        )
+        lbl_title.pack(side=tk.LEFT, padx=6, pady=3)
+
+        btn_close = tk.Button(
+            header,
+            text="✕ 收起",
+            font=("Segoe UI", 8),
+            bg="#252526",
+            fg="#999999",
+            activebackground="#333333",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=self.toggle_terminal_drawer
+        )
+        btn_close.pack(side=tk.RIGHT, padx=6, pady=2)
+
+        self.btn_scroll = tk.Button(
+            header,
+            text="📌 自动滚屏: 开",
+            font=("Segoe UI", 8),
+            bg="#252526",
+            fg="#38d430",
+            activebackground="#333333",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=self._toggle_auto_scroll
+        )
+        self.btn_scroll.pack(side=tk.RIGHT, padx=4, pady=2)
+
+        btn_copy = tk.Button(
+            header,
+            text="📋 复制全部",
+            font=("Segoe UI", 8),
+            bg="#252526",
+            fg="#999999",
+            activebackground="#333333",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=self._copy_terminal_log
+        )
+        btn_copy.pack(side=tk.RIGHT, padx=4, pady=2)
+
+        btn_clear = tk.Button(
+            header,
+            text="🗑️ 清空",
+            font=("Segoe UI", 8),
+            bg="#252526",
+            fg="#999999",
+            activebackground="#333333",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            bd=0,
+            cursor="hand2",
+            command=self._clear_terminal_log
+        )
+        btn_clear.pack(side=tk.RIGHT, padx=4, pady=2)
+
+        # Terminal Text Area
+        body = tk.Frame(parent, bg="#181818")
+        body.pack(fill=tk.BOTH, expand=True)
+
+        self.txt_terminal = tk.Text(
+            body, 
+            font=("Consolas", 9), 
+            bg="#181818", 
+            fg="#38d430", 
+            insertbackground="#ffffff", 
+            wrap=tk.WORD,
+            bd=0,
+            highlightthickness=0
+        )
+        scroll = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.txt_terminal.yview)
+        self.txt_terminal.configure(yscrollcommand=scroll.set)
+
+        self.txt_terminal.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.txt_terminal.insert(tk.END, "[SuperTools v2.0] 实时运行终端已就绪。所有后台输出与引擎日志将实时汇聚于此。\n")
+
+    def toggle_terminal_drawer(self):
+        if self.is_terminal_visible:
+            # Hide drawer
+            self.terminal_drawer.grid_remove()
+            self.is_terminal_visible = False
+            self.btn_toggle_terminal.config(text=" 📜 显示实时终端 ")
+            self.btn_bottom_term.config(text="📜 终端日志: [收起]")
+        else:
+            # Show drawer
+            self.terminal_drawer.grid(row=1, column=0, sticky="sew")
+            self.is_terminal_visible = True
+            self.btn_toggle_terminal.config(text=" ✕ 收起终端 ")
+            self.btn_bottom_term.config(text="📜 终端日志: [已展开]")
+
+    def _toggle_auto_scroll(self):
+        self.auto_scroll_terminal = not self.auto_scroll_terminal
+        if self.auto_scroll_terminal:
+            self.btn_scroll.config(text="📌 自动滚屏: 开", fg="#38d430")
+        else:
+            self.btn_scroll.config(text="📌 自动滚屏: 关", fg="#999999")
+
+    def _clear_terminal_log(self):
+        self.txt_terminal.delete("1.0", tk.END)
+
+    def _copy_terminal_log(self):
+        content = self.txt_terminal.get("1.0", tk.END)
+        self.clipboard_clear()
+        self.clipboard_append(content)
+        messagebox.showinfo("已复制", "实时终端日志已复制到剪贴板！", parent=self)
+
+    def _append_terminal_output(self, text: str):
+        def _insert():
+            try:
+                self.txt_terminal.insert(tk.END, text)
+                if self.auto_scroll_terminal:
+                    self.txt_terminal.see(tk.END)
+            except Exception:
+                pass
+        self.after(0, _insert)
+
+    def _setup_stdout_redirect(self):
+        sys.stdout = StdoutRedirector(self._append_terminal_output)
+        sys.stderr = StdoutRedirector(self._append_terminal_output)
 
     def _init_modules(self):
         modules = ModuleManager.get_all_modules()
@@ -146,13 +332,14 @@ class MainWindow(tk.Tk):
         self.context.log(f"[*] 全局代理已切换为: {val}")
 
     def _bind_events(self):
-        EventBus.subscribe("app_log", lambda msg: self._on_log_event(msg))
+        EventBus.subscribe("app_log", lambda msg: self._append_terminal_output(f"{msg}\n"))
         EventBus.subscribe("app_status", lambda st: self.lbl_global_status.config(text=str(st)))
 
-    def _on_log_event(self, msg: str):
-        pass
-
     def _on_window_closing(self):
+        # Restore standard streams
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+
         # Notify all modules to save their states and release locks
         for mod in ModuleManager.get_all_modules():
             try:
