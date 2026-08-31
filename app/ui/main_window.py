@@ -14,7 +14,7 @@ class MainWindow(tk.Tk):
     """Main Workbench window for the Universal Super App Platform."""
     def __init__(self):
         super().__init__()
-        self.title("🌟 万能超级工具箱 (Universal Super App Platform) v2.0")
+        self.title("🌟 SuperTools 万能超级工具箱 v2.0")
         self.geometry("1280x860")
         self.minsize(1050, 720)
 
@@ -32,28 +32,51 @@ class MainWindow(tk.Tk):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(1, weight=1)
 
-        # 1. Top Header Control Bar
+        # 1. Top Header Control Bar (Clean Breadcrumb & Fast Proxy Switcher)
         top_bar = tk.Frame(self, height=44, bg=Theme.BG_CARD, bd=0, relief=tk.FLAT)
         top_bar.grid(row=0, column=0, columnspan=2, sticky="ew")
         
-        lbl_brand = tk.Label(top_bar, text="  🚀 万能超级工作台  ", font=Theme.FONT_SUBTITLE, bg=Theme.BG_CARD, fg=Theme.PRIMARY)
-        lbl_brand.pack(side=tk.LEFT, padx=6, pady=8)
+        # Current active module indicator
+        self.lbl_active_tab = tk.Label(
+            top_bar, 
+            text="  📁 当前功能: 🚀 全能下载中心", 
+            font=Theme.FONT_SUBTITLE, 
+            bg=Theme.BG_CARD, 
+            fg=Theme.PRIMARY
+        )
+        self.lbl_active_tab.pack(side=tk.LEFT, padx=(10, 6), pady=8)
 
         sep_top = tk.Frame(top_bar, width=1, bg=Theme.BORDER)
-        sep_top.pack(side=tk.LEFT, fill=tk.Y, pady=8)
+        sep_top.pack(side=tk.LEFT, fill=tk.Y, pady=8, padx=6)
 
         self.lbl_global_status = tk.Label(
             top_bar, 
-            text="状态: 平台就绪 · 模块化引擎已激活", 
+            text="就绪 · 支持断点续传与多引擎加速", 
             font=Theme.FONT_BODY, 
             bg=Theme.BG_CARD, 
             fg=Theme.TEXT_MUTED
         )
-        self.lbl_global_status.pack(side=tk.LEFT, padx=12)
+        self.lbl_global_status.pack(side=tk.LEFT, padx=6)
 
         # Right header quick tools
-        btn_feedback = ttk.Button(top_bar, text=" 💡 更多功能规划...", command=self._show_future_roadmap)
+        btn_feedback = ttk.Button(top_bar, text=" 💡 更多功能扩展...", command=self._show_future_roadmap)
         btn_feedback.pack(side=tk.RIGHT, padx=(4, 12), pady=6)
+
+        # Quick Proxy indicator on the top right
+        self.var_top_proxy = tk.StringVar(value=self.context.config.get("proxy", "直连"))
+        lbl_p = tk.Label(top_bar, text="全局代理:", font=Theme.FONT_BODY, bg=Theme.BG_CARD, fg=Theme.TEXT_MUTED)
+        lbl_p.pack(side=tk.RIGHT, padx=(6, 2), pady=8)
+
+        cb_top_p = ttk.Combobox(
+            top_bar, 
+            textvariable=self.var_top_proxy, 
+            values=self.context.config.get("proxies_list", ["不使用代理 (直连)"]), 
+            width=18, 
+            state="readonly",
+            font=Theme.FONT_SMALL
+        )
+        cb_top_p.pack(side=tk.RIGHT, padx=(2, 6), pady=8)
+        cb_top_p.bind("<<ComboboxSelected>>", self._on_top_proxy_changed)
 
         # 2. Left Sidebar Navigation
         self.sidebar = Sidebar(self, on_module_selected=self.switch_to_module, width=220)
@@ -113,7 +136,13 @@ class MainWindow(tk.Tk):
 
         self.active_module = mod
         mod.on_activate()
-        self.lbl_global_status.config(text=f"当前模块: {mod.name} ({mod.description})")
+        self.lbl_active_tab.config(text=f"  📁 当前功能: {mod.name}")
+        self.lbl_global_status.config(text=f"{mod.description}")
+
+    def _on_top_proxy_changed(self, event=None):
+        val = self.var_top_proxy.get().strip()
+        self.context.config.set("proxy", val)
+        self.context.log(f"[*] 全局代理已切换为: {val}")
 
     def _bind_events(self):
         EventBus.subscribe("app_log", lambda msg: self._on_log_event(msg))

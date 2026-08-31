@@ -21,8 +21,8 @@ class Sidebar(ttk.Frame):
 
         lbl_logo = tk.Label(
             brand_frame, 
-            text="🌟 万能超级工具箱", 
-            font=("Segoe UI", 12, "bold"), 
+            text="🌟 SuperTools", 
+            font=("Segoe UI", 13, "bold"), 
             bg=Theme.BG_SIDEBAR, 
             fg=Theme.PRIMARY,
             anchor="w"
@@ -31,7 +31,7 @@ class Sidebar(ttk.Frame):
 
         lbl_sub = tk.Label(
             brand_frame, 
-            text="Universal Super App v2.0", 
+            text="万能超级工具箱 v2.0", 
             font=("Segoe UI", 8), 
             bg=Theme.BG_SIDEBAR, 
             fg=Theme.TEXT_MUTED,
