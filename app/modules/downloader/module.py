@@ -21,4 +21,13 @@ class DownloaderModule(BaseAppModule):
         if hasattr(self, "downloader_view") and hasattr(self.downloader_view, "_refresh_queue_tree"):
             self.downloader_view._refresh_queue_tree()
 
+    def on_shutdown(self):
+        if hasattr(self, "downloader_view") and self.downloader_view:
+            try:
+                self.downloader_view._save_tasks()
+                self.downloader_view._save_settings()
+                self.downloader_view._update_lock_file(False)
+            except Exception:
+                pass
+
 ModuleManager.register(DownloaderModule)

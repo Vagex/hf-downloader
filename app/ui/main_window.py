@@ -26,6 +26,7 @@ class MainWindow(tk.Tk):
         self._build_workbench()
         self._init_modules()
         self._bind_events()
+        self.protocol("WM_DELETE_WINDOW", self._on_window_closing)
 
     def _build_workbench(self):
         # Configure root grid
@@ -151,6 +152,23 @@ class MainWindow(tk.Tk):
     def _on_log_event(self, msg: str):
         pass
 
+    def _on_window_closing(self):
+        # Notify all modules to save their states and release locks
+        for mod in ModuleManager.get_all_modules():
+            try:
+                mod.on_shutdown()
+            except Exception:
+                pass
+
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+        # Force clean process termination
+        import os
+        os._exit(0)
+
     def _show_future_roadmap(self):
         messagebox.showinfo(
             "🌟 超级应用平台扩展规划", 
@@ -158,7 +176,7 @@ class MainWindow(tk.Tk):
             "已集成核心模块:\n"
             "• 🚀 全能下载中心 (HF模型 / GitHub / 视频流 / 磁力链接)\n"
             "• 🎬 媒体转换与音视频处理工坊\n"
-            "• ⚙️ 全局设置与网络代理中心\n\n"
+            "• ⚙️ 全局设置与环境部署中心\n\n"
             "后续可随时一键加入更多工具模块（如 AI ComfyUI 助手、批量文件处理、图片无损压缩等），即插即用！",
             parent=self
         )

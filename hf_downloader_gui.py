@@ -5946,7 +5946,8 @@ class HFDownloaderView(ttk.Frame):
                 "当前有任务正在下载中！\n\n"
                 "• 点击【是 (Yes)】：最小化到后台继续静默下载\n"
                 "• 点击【否 (No)】：暂停当前下载并保存进度后退出\n"
-                "• 点击【取消 (Cancel)】：留在此页面"
+                "• 点击【取消 (Cancel)】：留在此页面",
+                parent=top
             )
             if choice is True:
                 top.iconify()
@@ -5957,14 +5958,24 @@ class HFDownloaderView(ttk.Frame):
                 self._save_tasks()
                 self._save_settings()
                 self._update_lock_file(False)
-                top.destroy()
+                try:
+                    top.destroy()
+                except Exception:
+                    pass
+                import os
+                os._exit(0)
             else:
                 return
         else:
             self._save_tasks()
             self._save_settings()
             self._update_lock_file(False)
-            top.destroy()
+            try:
+                top.destroy()
+            except Exception:
+                pass
+            import os
+            os._exit(0)
 
     # ------------------ Task Persistence & Rescan ------------------
     def _load_saved_tasks(self):
