@@ -1,9 +1,21 @@
 import html
+import json
+import re
+import urllib.parse
 import requests
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
 class TranslationEngine:
-    """Multi-provider free translation engine (Google Translate, MyMemory)."""
+    """Universal multi-provider translation engine with zero-config free public APIs + Custom AI LLM support."""
+
+    PROVIDERS = {
+        "bing": "🟢 微软 Bing 翻译 (国内直连·免Key)",
+        "youdao": "🟢 有道 智能翻译 (国内直连·免Key)",
+        "baidu": "🟢 百度 极速翻译 (国内直连·免Key)",
+        "google": "🔵 谷歌 Google 翻译 (需代理/海外)",
+        "mymemory": "🔵 MyMemory 翻译 (开源多语种)",
+        "custom_llm": "🤖 自定义 AI 大模型翻译 (DeepSeek/OpenAI)"
+    }
 
     LANGUAGES = {
         "auto": "🌐 自动检测语言",
@@ -22,38 +34,105 @@ class TranslationEngine:
     }
 
     @classmethod
-    def translate_google(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
-        """Translate via Google Translate free mobile endpoint."""
+    def translate_bing(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
+        """Bing / Edge translator public web endpoint (Direct domestic connectivity)."""
         if not text.strip():
             return ""
         
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": src,
-            "tl": dest,
-            "dt": "t",
-            "q": text
-        }
-        proxies = {"http": proxy, "https": proxy} if proxy else None
+        # Edge translation endpoint
+        url = "https://api-edge.cognitive.microsofttranslator.com/translate"
+        src_param = "" if src == "auto" else f"&from={src.split('-')[0]}"
+        dest_lang = "zh-Hans" if dest in ("zh-CN", "zh") else ("zh-Hant" if dest == "zh-TW" else dest.split("-")[0])
+        full_url = f"{url}?api-version=3.0&to={dest_lang}{src_param}"
+        
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Content-Type": "application/json",
+            "Referer": "https://www.bing.com/"
         }
+        body = [{"Text": text}]
+        proxies = {"http": proxy, "https": proxy} if proxy else None
 
-        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=12)
+        resp = requests.post(full_url, json=body, headers=headers, proxies=proxies, timeout=10)
         resp.raise_for_status()
         data = resp.json()
+        if data and isinstance(data, list) and "translations" in data[0]:
+            return data[0]["translations"][0].get("text", "")
+        return ""
+
+    @classmethod
+    def translate_youdao(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
+        """Youdao dict public translation endpoint (Fast domestic connection, good for code/tech)."""
+        if not text.strip():
+            return ""
         
-        translated_pieces = []
+        url = "https://aidemo.youdao.com/trans"
+        src_lang = "auto" if src == "auto" else (src.split("-")[0].upper())
+        tgt_lang = "zh-CHS" if dest in ("zh-CN", "zh") else (dest.split("-")[0].upper())
+        data = {"q": text, "from": src_lang, "to": tgt_lang}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://ai.youdao.com/"
+        }
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+
+        resp = requests.post(url, data=data, headers=headers, proxies=proxies, timeout=10)
+        resp.raise_for_status()
+        res_json = resp.json()
+        trans = res_json.get("translation", [])
+        if trans and isinstance(trans, list):
+            return "\n".join(trans)
+        return ""
+
+    @classmethod
+    def translate_baidu(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
+        """Baidu simple public translate endpoint."""
+        if not text.strip():
+            return ""
+        url = "https://fanyi.baidu.com/transapi"
+        from_lang = "auto" if src == "auto" else src.split("-")[0]
+        to_lang = "zh" if dest in ("zh-CN", "zh") else dest.split("-")[0]
+        data = {
+            "from": from_lang,
+            "to": to_lang,
+            "query": text,
+            "source": "txt"
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://fanyi.baidu.com"
+        }
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        resp = requests.post(url, data=data, headers=headers, proxies=proxies, timeout=10)
+        resp.raise_for_status()
+        res_json = resp.json()
+        items = res_json.get("data", [])
+        if items and isinstance(items, list):
+            return "\n".join([item.get("dst", "") for item in items])
+        return ""
+
+    @classmethod
+    def translate_google(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
+        """Google Translate mobile endpoint."""
+        if not text.strip():
+            return ""
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {"client": "gtx", "sl": src, "tl": dest, "dt": "t", "q": text}
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        pieces = []
         if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
             for part in data[0]:
                 if part and len(part) > 0 and part[0]:
-                    translated_pieces.append(part[0])
-        return "".join(translated_pieces)
+                    pieces.append(part[0])
+        return "".join(pieces)
 
     @classmethod
     def translate_mymemory(cls, text: str, src: str = "en", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
-        """Translate via MyMemory free collaborative translation API."""
+        """MyMemory collaborative translation API."""
         if not text.strip():
             return ""
         src_lang = "en" if src == "auto" else src
@@ -62,55 +141,111 @@ class TranslationEngine:
         params = {"q": text, "langpair": langpair}
         proxies = {"http": proxy, "https": proxy} if proxy else None
         headers = {"User-Agent": "Mozilla/5.0"}
-        
         resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        res_text = data.get("responseData", {}).get("translatedText", "")
-        return html.unescape(res_text)
+        return html.unescape(data.get("responseData", {}).get("translatedText", ""))
 
     @classmethod
-    def translate_smart(cls, text: str, src: str = "auto", dest: str = "zh-CN", provider: str = "google", proxy: Optional[str] = None) -> str:
-        """Intelligently translates text with multi-engine fallback and large paragraph slicing."""
+    def translate_custom_llm(cls, text: str, src: str = "auto", dest: str = "zh-CN", api_key: str = "", base_url: str = "", model: str = "", proxy: Optional[str] = None) -> str:
+        """Translates via OpenAI-compatible AI API (DeepSeek, Qwen, ChatGPT, Ollama)."""
+        if not text.strip():
+            return ""
+        
+        endpoint = base_url.rstrip("/") + "/chat/completions" if base_url else "https://api.deepseek.com/v1/chat/completions"
+        model_name = model or "deepseek-chat"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}" if api_key else ""
+        }
+        dest_name = cls.LANGUAGES.get(dest, dest)
+        prompt = (
+            f"You are a professional technical translator. Translate the following text into {dest_name}. "
+            f"Preserve formatting, technical jargon, code blocks, and markdown structure accurately. "
+            f"Output ONLY the translation result without any conversational preamble or explanations.\n\nText:\n{text}"
+        )
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3
+        }
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        resp = requests.post(endpoint, json=payload, headers=headers, proxies=proxies, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+    @classmethod
+    def translate_smart(
+        cls, 
+        text: str, 
+        src: str = "auto", 
+        dest: str = "zh-CN", 
+        provider_key: str = "bing", 
+        proxy: Optional[str] = None,
+        llm_config: Optional[Dict[str, str]] = None
+    ) -> str:
+        """Dispatches translation to chosen provider with intelligent multi-engine fallback."""
         if not text.strip():
             return ""
 
         paragraphs = text.split("\n")
         translated_paragraphs = []
 
+        def _do_translate_single(p_text: str) -> Optional[str]:
+            if not p_text.strip():
+                return ""
+            
+            # Primary choice
+            if provider_key == "bing":
+                try: return cls.translate_bing(p_text, src, dest, proxy)
+                except Exception: pass
+            elif provider_key == "youdao":
+                try: return cls.translate_youdao(p_text, src, dest, proxy)
+                except Exception: pass
+            elif provider_key == "baidu":
+                try: return cls.translate_baidu(p_text, src, dest, proxy)
+                except Exception: pass
+            elif provider_key == "google":
+                try: return cls.translate_google(p_text, src, dest, proxy)
+                except Exception: pass
+            elif provider_key == "mymemory":
+                try: return cls.translate_mymemory(p_text, src, dest, proxy)
+                except Exception: pass
+            elif provider_key == "custom_llm" and llm_config:
+                try: 
+                    return cls.translate_custom_llm(
+                        p_text, src, dest, 
+                        api_key=llm_config.get("api_key", ""), 
+                        base_url=llm_config.get("base_url", ""), 
+                        model=llm_config.get("model", ""), 
+                        proxy=proxy
+                    )
+                except Exception: pass
+
+            # Automatic Fallbacks (Bing -> Youdao -> Baidu -> Google -> MyMemory)
+            for fn in (cls.translate_bing, cls.translate_youdao, cls.translate_baidu, cls.translate_google, cls.translate_mymemory):
+                try:
+                    res = fn(p_text, src, dest, proxy)
+                    if res: return res
+                except Exception:
+                    continue
+            return None
+
         for p in paragraphs:
             if not p.strip():
                 translated_paragraphs.append("")
                 continue
-            
-            translated_p = None
-            if provider == "google":
-                try:
-                    translated_p = cls.translate_google(p, src, dest, proxy)
-                except Exception:
-                    try:
-                        translated_p = cls.translate_mymemory(p, src, dest, proxy)
-                    except Exception:
-                        pass
+            res = _do_translate_single(p)
+            if res is None:
+                translated_paragraphs.append(f"[翻译网络异常: 请切换引擎或检查网络] {p}")
             else:
-                try:
-                    translated_p = cls.translate_mymemory(p, src, dest, proxy)
-                except Exception:
-                    try:
-                        translated_p = cls.translate_google(p, src, dest, proxy)
-                    except Exception:
-                        pass
-
-            if translated_p is None:
-                translated_paragraphs.append(f"[网络异常/需代理] {p}")
-            else:
-                translated_paragraphs.append(translated_p)
+                translated_paragraphs.append(res)
 
         return "\n".join(translated_paragraphs)
 
     @classmethod
     def align_bilingual_paragraphs(cls, original_text: str, translated_text: str) -> List[Tuple[str, str]]:
-        """Aligns original and translated text by paragraph for side-by-side or stacked bilingual comparison."""
         orig_lines = original_text.split("\n")
         trans_lines = translated_text.split("\n")
 

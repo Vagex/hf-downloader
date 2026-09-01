@@ -1,8 +1,9 @@
 import os
+import json
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from app.ui.theme import Theme
 from app.core.context import AppContext
@@ -14,26 +15,38 @@ class TranslatorModule(BaseAppModule):
     name = "🌐 智能双语对照翻译"
     icon_name = "globe"
     category = "效率工具"
-    description = "文本/文档实时多引擎双语对比翻译、段落智能对齐与多格式导出"
+    description = "多引擎自由切换(Bing/有道/百度/Google/DeepSeek)、文档双语对照与导出"
     order = 30
 
     def create_view(self, parent: tk.Widget) -> tk.Widget:
         self.container = ttk.Frame(parent, padding="8")
+        self._load_llm_config()
         self._build_ui()
         return self.container
 
+    def _load_llm_config(self):
+        self.llm_config = {
+            "api_key": self.context.config.get("llm_api_key", ""),
+            "base_url": self.context.config.get("llm_base_url", "https://api.deepseek.com/v1"),
+            "model": self.context.config.get("llm_model", "deepseek-chat")
+        }
+
+    def _save_llm_config(self):
+        self.context.config.set("llm_api_key", self.llm_config.get("api_key", ""))
+        self.context.config.set("llm_base_url", self.llm_config.get("base_url", ""))
+        self.context.config.set("llm_model", self.llm_config.get("model", ""))
+
     def _build_ui(self):
-        # 1. Top Control Bar (Language Selector, Engine Selector, Auto-Translate Toggle)
+        # 1. Top Control Bar (Language Selector, Engine Selector, Auto-Translate Toggle, LLM Config)
         top_ctrl = ttk.LabelFrame(self.container, text=" 🌐 翻译引擎与语言配置 ", padding="6")
         top_ctrl.pack(fill=tk.X, pady=(0, 6))
 
         # Source Language
         ttk.Label(top_ctrl, text="源语言:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(4, 2))
-        self.lang_keys = list(TranslationEngine.LANGUAGES.keys())
         self.lang_labels = list(TranslationEngine.LANGUAGES.values())
 
         self.var_src_lang = tk.StringVar(value=self.lang_labels[0]) # Auto
-        self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=16, state="readonly", font=Theme.FONT_BODY)
+        self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=15, state="readonly", font=Theme.FONT_BODY)
         self.cb_src.pack(side=tk.LEFT, padx=4)
 
         # Swap button
@@ -43,21 +56,28 @@ class TranslatorModule(BaseAppModule):
         # Dest Language
         ttk.Label(top_ctrl, text="目标语言:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(4, 2))
         self.var_dest_lang = tk.StringVar(value=self.lang_labels[1]) # Chinese
-        self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=16, state="readonly", font=Theme.FONT_BODY)
+        self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=15, state="readonly", font=Theme.FONT_BODY)
         self.cb_dest.pack(side=tk.LEFT, padx=4)
 
         # Engine selector
-        ttk.Label(top_ctrl, text="翻译服务商:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(12, 2))
-        self.var_engine = tk.StringVar(value="Google 极速翻译 (免Key)")
+        ttk.Label(top_ctrl, text="翻译引擎:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(10, 2))
+        self.provider_keys = list(TranslationEngine.PROVIDERS.keys())
+        self.provider_labels = list(TranslationEngine.PROVIDERS.values())
+
+        self.var_engine = tk.StringVar(value=self.provider_labels[0]) # Default: Bing
         self.cb_engine = ttk.Combobox(
             top_ctrl, 
             textvariable=self.var_engine, 
-            values=["Google 极速翻译 (免Key)", "MyMemory 智能翻译 (免Key)"], 
-            width=22, 
+            values=self.provider_labels, 
+            width=28, 
             state="readonly", 
             font=Theme.FONT_BODY
         )
         self.cb_engine.pack(side=tk.LEFT, padx=4)
+        self.cb_engine.bind("<<ComboboxSelected>>", self._on_engine_changed)
+
+        btn_llm_cfg = ttk.Button(top_ctrl, text=" 🤖 AI大模型配置...", command=self._open_llm_config_dialog)
+        btn_llm_cfg.pack(side=tk.LEFT, padx=4)
 
         # Translate Button
         self.btn_translate = ttk.Button(top_ctrl, text=" 🚀 立即翻译 ", command=self.trigger_translation)
@@ -152,13 +172,94 @@ class TranslatorModule(BaseAppModule):
         sample_text = (
             "ComfyUI is a powerful and modular stable diffusion GUI with a graph/nodes interface.\n"
             "This universal SuperTools platform allows you to manage models, download resources, and process multimedia effortlessly.\n"
-            "Enjoy real-time bilingual comparison and document alignment right here!"
+            "Enjoy real-time bilingual comparison and multi-engine translation right here!"
         )
         self.txt_source.insert("1.0", sample_text)
         self._update_stats()
 
         # Real-time debounce timer
         self._debounce_timer = None
+
+    def _get_selected_provider_key(self) -> str:
+        cur_label = self.var_engine.get()
+        for k, v in TranslationEngine.PROVIDERS.items():
+            if v == cur_label:
+                return k
+        return "bing"
+
+    def _on_engine_changed(self, event=None):
+        if self._get_selected_provider_key() == "custom_llm" and not self.llm_config.get("api_key"):
+            self._open_llm_config_dialog()
+        else:
+            self.trigger_translation()
+
+    def _open_llm_config_dialog(self):
+        dlg = tk.Toplevel(self.container)
+        dlg.title("🤖 自定义 AI 大模型翻译配置 (OpenAI / DeepSeek / 通义千问)")
+        dlg.geometry("540x360")
+        dlg.minsize(500, 320)
+        dlg.transient(self.container.winfo_toplevel())
+        dlg.grab_set()
+
+        # Center dialog
+        sw = dlg.winfo_screenwidth()
+        sh = dlg.winfo_screenheight()
+        x = max(40, (sw - 540) // 2)
+        y = max(40, (sh - 360) // 2)
+        dlg.geometry(f"+{x}+{y}")
+
+        f = ttk.Frame(dlg, padding="16")
+        f.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(f, text="🤖 配置自定义 AI 翻译模型 (支持所有 OpenAI 兼容 API)", font=Theme.FONT_SUBTITLE).pack(anchor=tk.W, pady=(0, 12))
+
+        # Base URL
+        row1 = ttk.Frame(f)
+        row1.pack(fill=tk.X, pady=4)
+        ttk.Label(row1, text="API Base URL:", width=14, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        var_url = tk.StringVar(value=self.llm_config.get("base_url", "https://api.deepseek.com/v1"))
+        entry_url = ttk.Entry(row1, textvariable=var_url, font=Theme.FONT_BODY)
+        entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # API Key
+        row2 = ttk.Frame(f)
+        row2.pack(fill=tk.X, pady=4)
+        ttk.Label(row2, text="API Key:", width=14, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        var_key = tk.StringVar(value=self.llm_config.get("api_key", ""))
+        entry_key = ttk.Entry(row2, textvariable=var_key, show="*", font=Theme.FONT_BODY)
+        entry_key.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Model Name
+        row3 = ttk.Frame(f)
+        row3.pack(fill=tk.X, pady=4)
+        ttk.Label(row3, text="Model Name:", width=14, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        var_model = tk.StringVar(value=self.llm_config.get("model", "deepseek-chat"))
+        cb_model = ttk.Combobox(row3, textvariable=var_model, values=["deepseek-chat", "gpt-4o-mini", "qwen-plus", "llama3.3", "custom"], font=Theme.FONT_BODY)
+        cb_model.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Tips
+        tips = (
+            "💡 常用推荐服务配置:\n"
+            "• DeepSeek: https://api.deepseek.com/v1 (模型: deepseek-chat)\n"
+            "• 阿里通义: https://dashscope.aliyuncs.com/compatible-mode/v1 (模型: qwen-plus)\n"
+            "• 本地 Ollama: http://127.0.0.1:11434/v1 (模型: qwen2.5 / llama3.2)"
+        )
+        ttk.Label(f, text=tips, font=Theme.FONT_SMALL, foreground=Theme.TEXT_MUTED, justify=tk.LEFT).pack(anchor=tk.W, pady=8)
+
+        def _save_and_close():
+            self.llm_config["base_url"] = var_url.get().strip()
+            self.llm_config["api_key"] = var_key.get().strip()
+            self.llm_config["model"] = var_model.get().strip()
+            self._save_llm_config()
+            self.var_engine.set(TranslationEngine.PROVIDERS["custom_llm"])
+            dlg.destroy()
+            messagebox.showinfo("已保存", "AI 大模型翻译配置已保存成功！", parent=self.container)
+            self.trigger_translation()
+
+        btn_box = ttk.Frame(f)
+        btn_box.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
+        ttk.Button(btn_box, text=" 💾 保存配置 ", command=_save_and_close).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_box, text=" 取消 ", command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
 
     def _get_selected_src_code(self) -> str:
         label = self.var_src_lang.get()
@@ -213,11 +314,12 @@ class TranslatorModule(BaseAppModule):
             return
 
         self.btn_translate.config(state=tk.DISABLED)
-        self.lbl_trans_status.config(text="状态: 正在高速翻译中...", foreground="#0d6efd")
+        provider_key = self._get_selected_provider_key()
+        provider_label = TranslationEngine.PROVIDERS.get(provider_key, "翻译引擎")
+        self.lbl_trans_status.config(text=f"状态: 正在通过 [{provider_label.split()[1]}] 翻译...", foreground="#0d6efd")
 
         src = self._get_selected_src_code()
         dest = self._get_selected_dest_code()
-        engine_choice = "google" if "Google" in self.var_engine.get() else "mymemory"
         proxy = self.context.get_proxy()
 
         def _worker():
@@ -226,8 +328,9 @@ class TranslatorModule(BaseAppModule):
                     text=text, 
                     src=src, 
                     dest=dest, 
-                    provider=engine_choice, 
-                    proxy=proxy
+                    provider_key=provider_key, 
+                    proxy=proxy,
+                    llm_config=self.llm_config
                 )
                 self.container.after(0, lambda: self._apply_translation_result(res))
             except Exception as e:
