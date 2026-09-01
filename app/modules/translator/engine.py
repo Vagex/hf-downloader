@@ -71,11 +71,13 @@ class TranslationEngine:
 
     @classmethod
     def translate_bing(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
-        """Bing / Edge translator public web endpoint (Direct domestic connectivity)."""
+        """Bing / Edge translator public web endpoint (Direct domestic connectivity with auto-chunking)."""
         if not text.strip():
             return ""
         
-        # Edge translation endpoint
+        chunks = cls._split_into_safe_chunks(text, max_chars=800)
+        results = []
+
         url = "https://api-edge.cognitive.microsofttranslator.com/translate"
         src_param = "" if src == "auto" else f"&from={src.split('-')[0]}"
         dest_lang = "zh-Hans" if dest in ("zh-CN", "zh") else ("zh-Hant" if dest == "zh-TW" else dest.split("-")[0])
@@ -86,15 +88,19 @@ class TranslationEngine:
             "Content-Type": "application/json",
             "Referer": "https://www.bing.com/"
         }
-        body = [{"Text": text}]
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
-        resp = requests.post(full_url, json=body, headers=headers, proxies=proxies, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        if data and isinstance(data, list) and "translations" in data[0]:
-            return data[0]["translations"][0].get("text", "")
-        return ""
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            body = [{"Text": chunk}]
+            resp = requests.post(full_url, json=body, headers=headers, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if data and isinstance(data, list) and "translations" in data[0]:
+                results.append(data[0]["translations"][0].get("text", ""))
+
+        return " ".join(results)
 
     @classmethod
     def translate_youdao(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
@@ -102,85 +108,165 @@ class TranslationEngine:
         if not text.strip():
             return ""
         
+        chunks = cls._split_into_safe_chunks(text, max_chars=600)
+        results = []
+
         url = "https://aidemo.youdao.com/trans"
         src_lang = "auto" if src == "auto" else (src.split("-")[0].upper())
         tgt_lang = "zh-CHS" if dest in ("zh-CN", "zh") else (dest.split("-")[0].upper())
-        data = {"q": text, "from": src_lang, "to": tgt_lang}
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": "https://ai.youdao.com/"
         }
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
-        resp = requests.post(url, data=data, headers=headers, proxies=proxies, timeout=10)
-        resp.raise_for_status()
-        res_json = resp.json()
-        trans = res_json.get("translation", [])
-        if trans and isinstance(trans, list):
-            return "\n".join(trans)
-        return ""
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            data = {"q": chunk, "from": src_lang, "to": tgt_lang}
+            resp = requests.post(url, data=data, headers=headers, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            res_json = resp.json()
+            trans = res_json.get("translation", [])
+            if trans and isinstance(trans, list):
+                results.append("\n".join(trans))
+
+        return "\n".join(results)
 
     @classmethod
     def translate_baidu(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
-        """Baidu simple public translate endpoint."""
+        """Baidu simple public translate endpoint with auto-chunking."""
         if not text.strip():
             return ""
+        
+        chunks = cls._split_into_safe_chunks(text, max_chars=600)
+        results = []
+
         url = "https://fanyi.baidu.com/transapi"
         from_lang = "auto" if src == "auto" else src.split("-")[0]
         to_lang = "zh" if dest in ("zh-CN", "zh") else dest.split("-")[0]
-        data = {
-            "from": from_lang,
-            "to": to_lang,
-            "query": text,
-            "source": "txt"
-        }
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://fanyi.baidu.com"
         }
         proxies = {"http": proxy, "https": proxy} if proxy else None
-        resp = requests.post(url, data=data, headers=headers, proxies=proxies, timeout=10)
-        resp.raise_for_status()
-        res_json = resp.json()
-        items = res_json.get("data", [])
-        if items and isinstance(items, list):
-            return "\n".join([item.get("dst", "") for item in items])
-        return ""
+
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            data = {
+                "from": from_lang,
+                "to": to_lang,
+                "query": chunk,
+                "source": "txt"
+            }
+            resp = requests.post(url, data=data, headers=headers, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            res_json = resp.json()
+            items = res_json.get("data", [])
+            if items and isinstance(items, list):
+                results.append("\n".join([item.get("dst", "") for item in items]))
+
+        return "\n".join(results)
 
     @classmethod
     def translate_google(cls, text: str, src: str = "auto", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
-        """Google Translate mobile endpoint."""
+        """Google Translate mobile endpoint with auto-chunking."""
         if not text.strip():
             return ""
+        
+        chunks = cls._split_into_safe_chunks(text, max_chars=800)
+        results = []
+
         url = "https://translate.googleapis.com/translate_a/single"
-        params = {"client": "gtx", "sl": src, "tl": dest, "dt": "t", "q": text}
         proxies = {"http": proxy, "https": proxy} if proxy else None
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        pieces = []
-        if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
-            for part in data[0]:
-                if part and len(part) > 0 and part[0]:
-                    pieces.append(part[0])
-        return "".join(pieces)
+
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            params = {"client": "gtx", "sl": src, "tl": dest, "dt": "t", "q": chunk}
+            resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            pieces = []
+            if data and isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+                for part in data[0]:
+                    if part and len(part) > 0 and part[0]:
+                        pieces.append(part[0])
+            if pieces:
+                results.append("".join(pieces))
+
+        return " ".join(results)
+
+    @staticmethod
+    def _split_into_safe_chunks(text: str, max_chars: int = 380) -> List[str]:
+        """Intelligently splits long continuous text into sentence-aware safe chunks."""
+        text = text.strip()
+        if len(text) <= max_chars:
+            return [text] if text else []
+
+        chunks = []
+        # Split by sentence boundaries (Chinese/English periods, newlines, semicolons, exclamation/question marks)
+        sentences = re.split(r'([\n\r。！？!?；;\.\t]+)', text)
+        cur_chunk = ""
+
+        for part in sentences:
+            if not part:
+                continue
+            if len(cur_chunk) + len(part) <= max_chars:
+                cur_chunk += part
+            else:
+                if cur_chunk.strip():
+                    chunks.append(cur_chunk.strip())
+                # If a single sentence without punctuation is still longer than max_chars, split strictly by length
+                if len(part) > max_chars:
+                    for i in range(0, len(part), max_chars):
+                        sub = part[i:i+max_chars].strip()
+                        if sub:
+                            chunks.append(sub)
+                    cur_chunk = ""
+                else:
+                    cur_chunk = part
+
+        if cur_chunk.strip():
+            chunks.append(cur_chunk.strip())
+
+        return chunks if chunks else [text]
 
     @classmethod
     def translate_mymemory(cls, text: str, src: str = "en", dest: str = "zh-CN", proxy: Optional[str] = None) -> str:
-        """MyMemory collaborative translation API."""
+        """MyMemory collaborative translation API with automatic chunking and strict error rejection."""
         if not text.strip():
             return ""
         src_lang = "en" if src == "auto" else src
         langpair = f"{src_lang}|{dest}"
         url = "https://api.mymemory.translated.net/get"
-        params = {"q": text, "langpair": langpair}
         proxies = {"http": proxy, "https": proxy} if proxy else None
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        return html.unescape(data.get("responseData", {}).get("translatedText", ""))
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+        chunks = cls._split_into_safe_chunks(text, max_chars=350)
+        results = []
+
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            params = {"q": chunk, "langpair": langpair}
+            resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            status = data.get("responseStatus", 200)
+            res_text = data.get("responseData", {}).get("translatedText", "")
+            
+            # Filter out error strings returned by MyMemory
+            if status != 200 or "QUERY LENGTH LIMIT" in res_text.upper() or "MYMEMORY WARNING" in res_text.upper():
+                raise RuntimeError(f"MyMemory error: {res_text}")
+            
+            clean_res = html.unescape(res_text).strip()
+            if clean_res:
+                results.append(clean_res)
+
+        return " ".join(results)
 
     OFFLINE_MODEL_PRESETS = {
         "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
