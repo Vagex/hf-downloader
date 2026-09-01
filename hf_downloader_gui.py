@@ -3674,8 +3674,11 @@ class HFDownloaderView(ttk.Frame):
         main_frame = ttk.Frame(self, padding="8")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # Build docked bottom progress & status panel first
+        self._build_bottom_panel(main_frame)
+
         self.notebook = ttk.Notebook(main_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.notebook.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 4))
 
         # Tab 1: Hugging Face Explorer
         self.tab_browse = ttk.Frame(self.notebook, padding="6")
@@ -3697,7 +3700,6 @@ class HFDownloaderView(ttk.Frame):
         self._build_tab_github()
         self._build_tab_twitter()
         self._build_tab_queue()
-        self._build_bottom_panel(main_frame)
 
     # ------------------ Tab 1: Dual-Pane File Browser with Checkbox UI ------------------
     def _build_tab_browse(self):
@@ -4309,6 +4311,10 @@ class HFDownloaderView(ttk.Frame):
         self.gh_repo_var.set(clean_repo)
         self._on_gh_preset_changed()
         self.btn_gh_fetch.config(state=tk.DISABLED)
+        self.progress_bar.config(mode="indeterminate")
+        self.progress_bar.start(10)
+        self.lbl_progress_text.config(text=f"正在分析 GitHub [{clean_repo}] 资源...")
+        self.lbl_speed_text.config(text="连接中...")
         self.lbl_status.config(text=f"状态: 正在智能分析 GitHub [{clean_repo}] 仓库与分支...", foreground="blue")
         self.log(f"\n[*] 正在连接 GitHub API 查询仓库 '{clean_repo}'...")
 
@@ -4520,9 +4526,15 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, self._populate_github_browser)
             self.after(0, lambda: self.log(f"[✓] 成功获取 GitHub {len(items_map)} 项资源。"))
             self.after(0, lambda: self.lbl_status.config(text=f"状态: 共检索到 {len(items_map)} 项 GitHub 资源", foreground="green"))
+            self.after(0, lambda: self.lbl_progress_text.config(text=f"已就绪 (共 {len(items_map)} 项资源)"))
+            self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
+            self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=100.0)))
         else:
             self.after(0, lambda: self.log(f"[✗] 获取 GitHub 资源失败: {err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 获取 GitHub 资源失败", foreground="red"))
+            self.after(0, lambda: self.lbl_progress_text.config(text="获取失败"))
+            self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
+            self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=0.0)))
             self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取 GitHub 资源:\n{err_msg}\n\n💡 提示:\n1. 若网络连接超时，请在上方【网络代理】下拉框中选择您正在运行的代理 (如 127.0.0.1:7890)；\n2. 如遇 API 速率限制，可在上方输入 GitHub Token (无需权限的公开 Token 即可提高至 5000 次/小时)。", parent=self))
 
         self.after(0, lambda: self.btn_gh_fetch.config(state=tk.NORMAL))
@@ -5001,6 +5013,10 @@ class HFDownloaderView(ttk.Frame):
             return
 
         self.btn_tw_fetch.config(state=tk.DISABLED)
+        self.progress_bar.config(mode="indeterminate")
+        self.progress_bar.start(10)
+        self.lbl_progress_text.config(text="正在解析媒体/磁力直链...")
+        self.lbl_speed_text.config(text="连接中...")
         self.lbl_status.config(text="状态: 正在智能解析视频元数据与高清直链...", foreground="blue")
         self.lbl_tw_author.config(text="平台与作者: 正在连接网络并解析视频信息...", foreground="#0d6efd")
         self.lbl_tw_date.config(text="发布日期: 解析中... | 视频时长: 解析中...", foreground="#555555")
@@ -5023,6 +5039,9 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, self._populate_twitter_results)
             self.after(0, lambda: self.log(f"[✓] 成功解析 [{plat_lbl}] {len(res.get('variants', []))} 个清晰度规格！作者: {res.get('author')} ({res.get('author_id')})"))
             self.after(0, lambda: self.lbl_status.config(text=f"状态: 成功解析 [{plat_lbl}] 视频 (共 {len(res.get('variants', []))} 项清晰度)", foreground="green"))
+            self.after(0, lambda: self.lbl_progress_text.config(text=f"已就绪 (共 {len(res.get('variants', []))} 项规格)"))
+            self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
+            self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=100.0)))
         except Exception as e:
             self.tw_resolved_data = None
             err_str = str(e)
@@ -5035,6 +5054,9 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, lambda: self._update_tw_checked_count_label())
             self.after(0, lambda: self.log(f"[✗] 解析视频失败: {err_str}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 视频解析失败", foreground="red"))
+            self.after(0, lambda: self.lbl_progress_text.config(text="解析失败"))
+            self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
+            self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=0.0)))
             self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析视频链接:\n{err_str}\n\n建议:\n1. 确认该链接是否包含视频或公开可见；\n2. 若为海外平台 (如 Twitter/YouTube)，请检查网络代理客户端 (如 Clash/v2rayN) 是否正常运行。", parent=self))
         finally:
             self.after(0, lambda: self.btn_tw_fetch.config(state=tk.NORMAL))
@@ -5822,8 +5844,8 @@ class HFDownloaderView(ttk.Frame):
 
     # ------------------ Bottom Global Progress Panel ------------------
     def _build_bottom_panel(self, parent):
-        prog_frame = ttk.LabelFrame(parent, text=" 实时下载进度 ", padding="8")
-        prog_frame.pack(fill=tk.X, pady=(0, 2))
+        prog_frame = ttk.LabelFrame(parent, text=" 📊 实时任务与网络进度 ", padding="8")
+        prog_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
 
         self.progress_var = tk.DoubleVar(value=0.0)
         self.progress_bar = ttk.Progressbar(prog_frame, variable=self.progress_var, maximum=100.0)
@@ -6123,7 +6145,11 @@ class HFDownloaderView(ttk.Frame):
         self._save_settings()
 
         self.btn_fetch.config(state=tk.DISABLED)
-        self.lbl_status.config(text="状态: 正在获取文件列表与目录树...", foreground="blue")
+        self.progress_bar.config(mode="indeterminate")
+        self.progress_bar.start(10)
+        self.lbl_progress_text.config(text="正在检索 Hugging Face 仓库...")
+        self.lbl_speed_text.config(text="连接中...")
+        self.lbl_status.config(text=f"状态: 正在从 {endpoint} 查询仓库 '{repo_id}' 结构与文件...", foreground="blue")
         proxy_info = self._get_effective_proxy()
         self.log(f"[*] 正在从 {endpoint} (代理: {proxy_info or '直连'}) 查询仓库 '{repo_id}' 的目录结构与文件...")
 
@@ -6280,9 +6306,15 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, self._populate_dual_pane_browser)
             self.after(0, lambda: self.log(f"[✓] 成功获取到 {len(files_map)} 个文件，已按双栏文件浏览器组织。"))
             self.after(0, lambda: self.lbl_status.config(text=f"状态: 共获取到 {len(files_map)} 个文件", foreground="green"))
+            self.after(0, lambda: self.lbl_progress_text.config(text=f"已就绪 (共 {len(files_map)} 个文件)"))
+            self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
+            self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=100.0)))
         else:
             self.after(0, lambda: self.log(f"[错误] 获取文件列表失败: {err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 获取失败", foreground="red"))
+            self.after(0, lambda: self.lbl_progress_text.config(text="获取失败"))
+            self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
+            self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=0.0)))
             self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取仓库文件列表:\n{err_msg}\n\n提示: 如遇网络连接超时，可尝试切换镜像源或在上方设置网络代理 (Proxy, parent=self)。"))
 
         self.after(0, lambda: self.btn_fetch.config(state=tk.NORMAL))
