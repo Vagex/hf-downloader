@@ -182,47 +182,103 @@ class TranslationEngine:
         data = resp.json()
         return html.unescape(data.get("responseData", {}).get("translatedText", ""))
 
+    OFFLINE_MODEL_PRESETS = {
+        "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
+        "dashscope": ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen2.5-72b-instruct", "qwen2.5-32b-instruct"],
+        "openai": ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+        "moonshot": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+        "bigmodel": ["glm-4-flash", "glm-4-plus", "glm-4-air", "glm-4-long", "glm-4"],
+        "openrouter": ["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet", "deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct", "google/gemini-flash-1.5"],
+        "ollama": ["qwen2.5:latest", "deepseek-r1:latest", "llama3.2:latest", "mistral:latest", "gemma2:latest"]
+    }
+
     @classmethod
-    def fetch_remote_models(cls, base_url: str, api_key: str = "", proxy: Optional[str] = None) -> List[str]:
-        """Fetches the list of available model IDs from OpenAI-compatible /v1/models endpoint."""
+    def get_offline_preset_models(cls, base_url: str) -> List[str]:
+        """Returns preset list of popular official models if API key is not yet configured or connection fails."""
+        u = base_url.lower()
+        if "deepseek" in u:
+            return cls.OFFLINE_MODEL_PRESETS["deepseek"]
+        if "dashscope" in u or "aliyun" in u:
+            return cls.OFFLINE_MODEL_PRESETS["dashscope"]
+        if "openai" in u:
+            return cls.OFFLINE_MODEL_PRESETS["openai"]
+        if "moonshot" in u or "kimi" in u:
+            return cls.OFFLINE_MODEL_PRESETS["moonshot"]
+        if "bigmodel" in u or "zhipu" in u:
+            return cls.OFFLINE_MODEL_PRESETS["bigmodel"]
+        if "openrouter" in u:
+            return cls.OFFLINE_MODEL_PRESETS["openrouter"]
+        if "11434" in u or "ollama" in u:
+            return cls.OFFLINE_MODEL_PRESETS["ollama"]
+        return ["deepseek-chat", "gpt-4o-mini", "qwen-plus", "glm-4-flash", "custom-model"]
+
+    @classmethod
+    def fetch_remote_models(cls, base_url: str, api_key: str = "", proxy: Optional[str] = None) -> Tuple[List[str], bool]:
+        """Fetches the list of available model IDs. Returns (models_list, is_live_online).
+        If API Key is missing or service requires auth, falls back gracefully to offline official model presets."""
         url = base_url.strip().rstrip("/")
         if not url:
             url = "https://api.deepseek.com/v1"
-        if not url.endswith("/models"):
-            url = f"{url}/models"
-        
+
+        # If user has not provided an API Key and it's not a local Ollama service, immediately provide official presets
+        is_local = "127.0.0.1" in url or "localhost" in url
+        if not api_key.strip() and not is_local:
+            return cls.get_offline_preset_models(url), False
+
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "SuperTools/2.0"
         }
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        if api_key.strip():
+            headers["Authorization"] = f"Bearer {api_key.strip()}"
 
         proxies = {"http": proxy, "https": proxy} if proxy else None
-        resp = requests.get(url, headers=headers, proxies=proxies, timeout=12)
-        resp.raise_for_status()
-        data = resp.json()
 
-        models = []
-        if isinstance(data, dict):
-            items = data.get("data") or data.get("models") or []
-            if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, dict) and "id" in item:
-                        models.append(str(item["id"]))
-                    elif isinstance(item, dict) and "name" in item:
-                        models.append(str(item["name"]))
-                    elif isinstance(item, str):
-                        models.append(item)
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and "id" in item:
-                    models.append(str(item["id"]))
-                elif isinstance(item, str):
-                    models.append(item)
+        # 1. Try standard OpenAI /v1/models
+        endpoints_to_try = []
+        if url.endswith("/models"):
+            endpoints_to_try.append(url)
+        else:
+            endpoints_to_try.append(f"{url}/models")
 
-        valid_models = sorted(list(set(models)))
-        return valid_models
+        # If it's local Ollama, also try /api/tags
+        if is_local:
+            root_url = url.replace("/v1", "").rstrip("/")
+            endpoints_to_try.append(f"{root_url}/api/tags")
+
+        last_err = None
+        for ep in endpoints_to_try:
+            try:
+                resp = requests.get(ep, headers=headers, proxies=proxies, timeout=6)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = []
+                    # Parse standard OpenAI format or Ollama tags format
+                    if isinstance(data, dict):
+                        items = data.get("data") or data.get("models") or []
+                        if isinstance(items, list):
+                            for item in items:
+                                if isinstance(item, dict):
+                                    m_name = item.get("id") or item.get("name") or item.get("model")
+                                    if m_name:
+                                        models.append(str(m_name))
+                                elif isinstance(item, str):
+                                    models.append(item)
+                    elif isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and "id" in item:
+                                models.append(str(item["id"]))
+                            elif isinstance(item, str):
+                                models.append(item)
+
+                    valid_models = sorted(list(set(models)))
+                    if valid_models:
+                        return valid_models, True
+            except Exception as e:
+                last_err = e
+
+        # Fallback to rich official preset list
+        return cls.get_offline_preset_models(url), False
 
     @classmethod
     def translate_custom_llm(cls, text: str, src: str = "auto", dest: str = "zh-CN", api_key: str = "", base_url: str = "", model: str = "", proxy: Optional[str] = None) -> str:

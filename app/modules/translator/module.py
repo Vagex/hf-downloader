@@ -277,6 +277,10 @@ class TranslatorModule(BaseAppModule):
                 var_url.set(presets[p_name][0])
                 if presets[p_name][1]:
                     var_model.set(presets[p_name][1])
+                # Automatically populate offline models for this preset
+                preset_models = TranslationEngine.get_offline_preset_models(presets[p_name][0])
+                cb_model["values"] = preset_models
+                lbl_fetch_status.config(text=f"已加载 [{p_name}] 官方精选模型列表 (共 {len(preset_models)} 款)", foreground=Theme.PRIMARY)
         cb_preset.bind("<<ComboboxSelected>>", _on_preset_change)
 
         # API Key
@@ -292,14 +296,17 @@ class TranslatorModule(BaseAppModule):
         row3.pack(fill=tk.X, pady=3)
         ttk.Label(row3, text="Model Name:", width=13, font=Theme.FONT_BODY).pack(side=tk.LEFT)
         var_model = tk.StringVar(value=self.llm_config.get("model", "deepseek-chat"))
-        cb_model = ttk.Combobox(row3, textvariable=var_model, values=["deepseek-chat", "deepseek-reasoner", "gpt-4o-mini", "qwen-plus", "qwen-max"], font=Theme.FONT_BODY)
+        
+        # Initial models list
+        init_preset_models = TranslationEngine.get_offline_preset_models(var_url.get())
+        cb_model = ttk.Combobox(row3, textvariable=var_model, values=init_preset_models, font=Theme.FONT_BODY)
         cb_model.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         btn_fetch_models = ttk.Button(row3, text=" 🔄 自动拉取模型 ")
         btn_fetch_models.pack(side=tk.RIGHT, padx=(4, 0))
 
         # Status & Help Box
-        lbl_fetch_status = ttk.Label(f, text="就绪 · 支持点击【自动拉取模型】从 API 实时获取账户可用模型列表", font=Theme.FONT_SMALL, foreground=Theme.PRIMARY)
+        lbl_fetch_status = ttk.Label(f, text="就绪 · 支持免Key直接选择官方模型，或点击【自动拉取模型】联网获取账户所有模型", font=Theme.FONT_SMALL, foreground=Theme.PRIMARY)
         lbl_fetch_status.pack(anchor=tk.W, pady=(4, 2))
 
         def _fetch_models_worker():
@@ -315,15 +322,19 @@ class TranslatorModule(BaseAppModule):
             def _do_fetch():
                 proxy = self.context.get_proxy()
                 try:
-                    models = TranslationEngine.fetch_remote_models(base_url=u, api_key=k, proxy=proxy)
+                    models, is_live = TranslationEngine.fetch_remote_models(base_url=u, api_key=k, proxy=proxy)
                     if models:
                         def _update_ui():
                             cb_model["values"] = models
                             if var_model.get() not in models:
                                 var_model.set(models[0])
-                            lbl_fetch_status.config(text=f"✓ 成功拉取到 {len(models)} 个可用模型！请点击下拉框选择。", foreground="#198754")
                             btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
-                            messagebox.showinfo("拉取成功", f"成功连接 API 并拉取到 {len(models)} 个可用模型！\n已自动填入下拉选择列表中。", parent=dlg)
+                            if is_live:
+                                lbl_fetch_status.config(text=f"✓ 成功在线联网拉取到 {len(models)} 个账户可用模型！", foreground="#198754")
+                                messagebox.showinfo("拉取成功", f"成功连接 API 账户并拉取到 {len(models)} 个可用模型！\n已自动填入下拉选择列表中。", parent=dlg)
+                            else:
+                                lbl_fetch_status.config(text=f"💡 已为您加载该端点的 {len(models)} 款官方精选模型列表！(填入 Key 可联网拉取账户所有专属模型)", foreground="#0d6efd")
+                                messagebox.showinfo("精选模型已就绪", f"未配置 API Key 或服务端需鉴权。\n\n已为您自动加载该服务商的 {len(models)} 款官方精选模型清单！\n您可直接在下拉框中选择使用。", parent=dlg)
                         dlg.after(0, _update_ui)
                     else:
                         def _empty_ui():
