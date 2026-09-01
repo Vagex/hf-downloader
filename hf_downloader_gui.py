@@ -7304,6 +7304,12 @@ class HFDownloaderApp(tk.Tk):
         self.title("🚀 Hugging Face 批量与断点续传极速下载器 (HF Explorer & Queue Manager)")
         self.minsize(940, 680)
 
+        try:
+            from app.ui.context_menu import UniversalContextMenu
+            UniversalContextMenu.setup(self)
+        except Exception:
+            pass
+
         # Center main window on screen
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()

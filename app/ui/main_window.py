@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 
 from app.ui.theme import Theme
 from app.ui.sidebar import Sidebar
+from app.ui.context_menu import UniversalContextMenu
 from app.core.context import AppContext
 from app.core.event_bus import EventBus
 from app.modules.base import ModuleManager, BaseAppModule
@@ -35,6 +36,7 @@ class MainWindow(tk.Tk):
         self.minsize(1050, 720)
 
         Theme.setup_fonts(self)
+        UniversalContextMenu.setup(self)
         self.context = AppContext(self)
         self.module_views: Dict[str, tk.Widget] = {}
         self.active_module: Optional[BaseAppModule] = None
