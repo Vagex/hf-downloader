@@ -3329,6 +3329,30 @@ class HFDownloaderView(ttk.Frame):
     def ask_yes_no(self, title: str, msg: str, **kwargs) -> bool:
         return messagebox.askyesno(title, msg, parent=self, **kwargs)
 
+    def _sync_global_progress_indeterminate(self, status_text: str = ""):
+        try:
+            top = self.winfo_toplevel()
+            if hasattr(top, "set_progress_indeterminate"):
+                top.set_progress_indeterminate(status_text)
+        except Exception:
+            pass
+
+    def _sync_global_progress_determinate(self, value: float, status_text: str = "", speed_text: str = "", progress_text: str = ""):
+        try:
+            top = self.winfo_toplevel()
+            if hasattr(top, "set_progress_determinate"):
+                top.set_progress_determinate(value, status_text, speed_text, progress_text)
+        except Exception:
+            pass
+
+    def _sync_global_progress_stop(self, status_text: str = "就绪", value: float = 100.0):
+        try:
+            top = self.winfo_toplevel()
+            if hasattr(top, "stop_progress"):
+                top.stop_progress(status_text, value)
+        except Exception:
+            pass
+
     def ask_yes_no_cancel(self, title: str, msg: str, **kwargs):
         return messagebox.askyesnocancel(title, msg, parent=self, **kwargs)
 
@@ -4316,6 +4340,7 @@ class HFDownloaderView(ttk.Frame):
         self.lbl_progress_text.config(text=f"正在分析 GitHub [{clean_repo}] 资源...")
         self.lbl_speed_text.config(text="连接中...")
         self.lbl_status.config(text=f"状态: 正在智能分析 GitHub [{clean_repo}] 仓库与分支...", foreground="blue")
+        self._sync_global_progress_indeterminate(f"正在分析 GitHub [{clean_repo}] 资源...")
         self.log(f"\n[*] 正在连接 GitHub API 查询仓库 '{clean_repo}'...")
 
         mode = self.gh_mode_var.get().strip()
@@ -4529,12 +4554,14 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, lambda: self.lbl_progress_text.config(text=f"已就绪 (共 {len(items_map)} 项资源)"))
             self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
             self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=100.0)))
+            self.after(0, lambda: self._sync_global_progress_stop(f"已就绪 (共 {len(items_map)} 项 GitHub 资源)", 100.0))
         else:
             self.after(0, lambda: self.log(f"[✗] 获取 GitHub 资源失败: {err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 获取 GitHub 资源失败", foreground="red"))
             self.after(0, lambda: self.lbl_progress_text.config(text="获取失败"))
             self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
             self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=0.0)))
+            self.after(0, lambda: self._sync_global_progress_stop("获取 GitHub 资源失败 🛑", 0.0))
             self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取 GitHub 资源:\n{err_msg}\n\n💡 提示:\n1. 若网络连接超时，请在上方【网络代理】下拉框中选择您正在运行的代理 (如 127.0.0.1:7890)；\n2. 如遇 API 速率限制，可在上方输入 GitHub Token (无需权限的公开 Token 即可提高至 5000 次/小时)。", parent=self))
 
         self.after(0, lambda: self.btn_gh_fetch.config(state=tk.NORMAL))
@@ -5018,6 +5045,7 @@ class HFDownloaderView(ttk.Frame):
         self.lbl_progress_text.config(text="正在解析媒体/磁力直链...")
         self.lbl_speed_text.config(text="连接中...")
         self.lbl_status.config(text="状态: 正在智能解析视频元数据与高清直链...", foreground="blue")
+        self._sync_global_progress_indeterminate("正在智能解析媒体/磁力高清直链...")
         self.lbl_tw_author.config(text="平台与作者: 正在连接网络并解析视频信息...", foreground="#0d6efd")
         self.lbl_tw_date.config(text="发布日期: 解析中... | 视频时长: 解析中...", foreground="#555555")
         self.lbl_tw_text.config(text=f"内容标题: 正在解析目标视频直链与清晰度规格 ({raw_url})...", foreground="#333333")
@@ -5042,6 +5070,7 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, lambda: self.lbl_progress_text.config(text=f"已就绪 (共 {len(res.get('variants', []))} 项规格)"))
             self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
             self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=100.0)))
+            self.after(0, lambda: self._sync_global_progress_stop(f"已就绪 (共 {len(res.get('variants', []))} 项规格)", 100.0))
         except Exception as e:
             self.tw_resolved_data = None
             err_str = str(e)
@@ -5057,6 +5086,7 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, lambda: self.lbl_progress_text.config(text="解析失败"))
             self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
             self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=0.0)))
+            self.after(0, lambda: self._sync_global_progress_stop("媒体解析失败 🛑", 0.0))
             self.after(0, lambda: messagebox.showerror("解析失败", f"无法解析视频链接:\n{err_str}\n\n建议:\n1. 确认该链接是否包含视频或公开可见；\n2. 若为海外平台 (如 Twitter/YouTube)，请检查网络代理客户端 (如 Clash/v2rayN) 是否正常运行。", parent=self))
         finally:
             self.after(0, lambda: self.btn_tw_fetch.config(state=tk.NORMAL))
@@ -6150,6 +6180,7 @@ class HFDownloaderView(ttk.Frame):
         self.lbl_progress_text.config(text="正在检索 Hugging Face 仓库...")
         self.lbl_speed_text.config(text="连接中...")
         self.lbl_status.config(text=f"状态: 正在从 {endpoint} 查询仓库 '{repo_id}' 结构与文件...", foreground="blue")
+        self._sync_global_progress_indeterminate(f"正在检索 Hugging Face [{repo_id}] 仓库...")
         proxy_info = self._get_effective_proxy()
         self.log(f"[*] 正在从 {endpoint} (代理: {proxy_info or '直连'}) 查询仓库 '{repo_id}' 的目录结构与文件...")
 
@@ -6309,12 +6340,14 @@ class HFDownloaderView(ttk.Frame):
             self.after(0, lambda: self.lbl_progress_text.config(text=f"已就绪 (共 {len(files_map)} 个文件)"))
             self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
             self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=100.0)))
+            self.after(0, lambda: self._sync_global_progress_stop(f"已就绪 (共 {len(files_map)} 个文件)", 100.0))
         else:
             self.after(0, lambda: self.log(f"[错误] 获取文件列表失败: {err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="状态: 获取失败", foreground="red"))
             self.after(0, lambda: self.lbl_progress_text.config(text="获取失败"))
             self.after(0, lambda: self.lbl_speed_text.config(text="0 KB/s"))
             self.after(0, lambda: (self.progress_bar.stop(), self.progress_bar.config(mode="determinate", value=0.0)))
+            self.after(0, lambda: self._sync_global_progress_stop("获取文件列表失败 🛑", 0.0))
             self.after(0, lambda: messagebox.showerror("获取失败", f"无法获取仓库文件列表:\n{err_msg}\n\n提示: 如遇网络连接超时，可尝试切换镜像源或在上方设置网络代理 (Proxy, parent=self)。"))
 
         self.after(0, lambda: self.btn_fetch.config(state=tk.NORMAL))
@@ -7209,13 +7242,17 @@ class HFDownloaderView(ttk.Frame):
         self.progress_var.set(pct)
         cur_str = self._format_size(cur_bytes)
         tot_str = self._format_size(total_bytes)
-        self.lbl_progress_text.config(text=f"进度: {pct:.1f}% ({cur_str} / {tot_str})")
-        self.lbl_speed_text.config(text=f"速度: {speed} | 预估剩余: {eta}")
+        p_txt = f"{pct:.1f}% ({cur_str} / {tot_str})"
+        s_txt = f"速度: {speed} | 预估: {eta}"
+        self.lbl_progress_text.config(text=f"进度: {p_txt}")
+        self.lbl_speed_text.config(text=s_txt)
+        self._sync_global_progress_determinate(value=pct, status_text="", speed_text=s_txt, progress_text=p_txt)
 
     def _update_progress_indeterminate(self, cur_bytes: int, speed: str):
         cur_str = self._format_size(cur_bytes)
         self.lbl_progress_text.config(text=f"已下载: {cur_str}")
         self.lbl_speed_text.config(text=f"速度: {speed}")
+        self._sync_global_progress_indeterminate(f"已下载: {cur_str} (速度: {speed})")
 
     def _reset_progress_ui(self, status_text: str = None):
         self.progress_var.set(0.0)
@@ -7223,6 +7260,9 @@ class HFDownloaderView(ttk.Frame):
         self.lbl_speed_text.config(text="速度: 0 KB/s | 预估剩余: --:--:--")
         if status_text:
             self.lbl_status.config(text=f"状态: {status_text}", foreground="#555555")
+            self._sync_global_progress_stop(status_text, 0.0)
+        else:
+            self._sync_global_progress_stop("就绪", 0.0)
 
     def _on_queue_finished(self):
         self.is_queue_running = False

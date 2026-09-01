@@ -122,31 +122,124 @@ class MainWindow(tk.Tk):
         self.terminal_drawer = tk.Frame(right_main_container, height=220, bg="#181818", relief=tk.SUNKEN, bd=1)
         self._build_terminal_drawer(self.terminal_drawer)
 
-        # 4. Bottom StatusBar
-        status_bar = tk.Frame(self, height=24, bg=Theme.BG_SIDEBAR)
-        status_bar.grid(row=2, column=0, columnspan=2, sticky="ew")
+        # 4. Global Bottom Progress & Status Bar (Docked across all modules)
+        self.status_bar = tk.Frame(self, bg=Theme.BG_CARD, height=36, bd=1, relief=tk.SOLID)
+        self.status_bar.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.status_bar.columnconfigure(1, weight=1) # Progress bar auto expands
 
-        self.lbl_bottom_info = tk.Label(
-            status_bar, 
-            text="支持 HuggingFace · GitHub · 主流音视频 · 磁力BT · 媒体工坊 · 即插即用无限扩展", 
+        # Col 0: Status message icon & text
+        left_status_frame = tk.Frame(self.status_bar, bg=Theme.BG_CARD)
+        left_status_frame.grid(row=0, column=0, sticky="w", padx=(10, 8), pady=4)
+
+        self.lbl_global_status_icon = tk.Label(
+            left_status_frame, 
+            text="🟢", 
+            font=("Segoe UI Emoji", 9), 
+            bg=Theme.BG_CARD
+        )
+        self.lbl_global_status_icon.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.lbl_global_status_text = tk.Label(
+            left_status_frame, 
+            text="状态: 就绪", 
             font=Theme.FONT_SMALL, 
-            bg=Theme.BG_SIDEBAR, 
+            bg=Theme.BG_CARD, 
+            fg=Theme.TEXT_MAIN
+        )
+        self.lbl_global_status_text.pack(side=tk.LEFT)
+
+        # Col 1: Universal Global Dynamic Progress Bar
+        self.global_progress_bar = ttk.Progressbar(
+            self.status_bar, 
+            mode="determinate", 
+            value=0.0
+        )
+        self.global_progress_bar.grid(row=0, column=1, sticky="ew", padx=(4, 8), pady=6)
+
+        # Col 2: Progress Percentage & Speed Metrics
+        metrics_frame = tk.Frame(self.status_bar, bg=Theme.BG_CARD)
+        metrics_frame.grid(row=0, column=2, sticky="e", padx=(4, 8), pady=4)
+
+        self.lbl_global_progress_text = tk.Label(
+            metrics_frame, 
+            text="0.0%", 
+            font=Theme.FONT_SMALL, 
+            bg=Theme.BG_CARD, 
+            fg=Theme.PRIMARY
+        )
+        self.lbl_global_progress_text.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.lbl_global_speed_text = tk.Label(
+            metrics_frame, 
+            text="0.0 KB/s", 
+            font=Theme.FONT_SMALL, 
+            bg=Theme.BG_CARD, 
             fg=Theme.TEXT_MUTED
         )
-        self.lbl_bottom_info.pack(side=tk.LEFT, padx=8, pady=2)
+        self.lbl_global_speed_text.pack(side=tk.LEFT, padx=(0, 8))
 
+        # Col 3: Right terminal button
         self.btn_bottom_term = tk.Button(
-            status_bar,
-            text="📜 终端日志: [收起]",
+            self.status_bar,
+            text="📜 终端日志",
             font=Theme.FONT_SMALL,
             relief=tk.FLAT,
             bd=0,
             cursor="hand2",
-            bg=Theme.BG_SIDEBAR,
+            bg=Theme.BG_CARD,
             fg=Theme.PRIMARY,
             command=self.toggle_terminal_drawer
         )
-        self.btn_bottom_term.pack(side=tk.RIGHT, padx=8, pady=1)
+        self.btn_bottom_term.grid(row=0, column=3, sticky="e", padx=(0, 10), pady=4)
+
+    def set_progress_indeterminate(self, status_text: str = ""):
+        def _ui():
+            self.lbl_global_status_icon.config(text="🔄")
+            if status_text:
+                self.lbl_global_status_text.config(text=f"状态: {status_text}", fg=Theme.PRIMARY)
+                self.lbl_global_status.config(text=status_text)
+            self.lbl_global_progress_text.config(text="处理中...")
+            self.lbl_global_speed_text.config(text="")
+            self.global_progress_bar.config(mode="indeterminate")
+            self.global_progress_bar.start(10)
+        self.after(0, _ui)
+
+    def set_progress_determinate(self, value: float, status_text: str = "", speed_text: str = "", progress_text: str = ""):
+        def _ui():
+            self.global_progress_bar.stop()
+            self.global_progress_bar.config(mode="determinate", value=value)
+            if status_text:
+                self.lbl_global_status_icon.config(text="🚀")
+                self.lbl_global_status_text.config(text=f"状态: {status_text}", fg=Theme.TEXT_MAIN)
+                self.lbl_global_status.config(text=status_text)
+            if progress_text:
+                self.lbl_global_progress_text.config(text=progress_text)
+            else:
+                self.lbl_global_progress_text.config(text=f"{value:.1f}%")
+            if speed_text:
+                self.lbl_global_speed_text.config(text=speed_text)
+        self.after(0, _ui)
+
+    def stop_progress(self, status_text: str = "就绪", value: float = 100.0):
+        def _ui():
+            self.global_progress_bar.stop()
+            self.global_progress_bar.config(mode="determinate", value=value)
+            self.lbl_global_status_icon.config(text="🟢" if value >= 100.0 else "🛑")
+            self.lbl_global_status_text.config(text=f"状态: {status_text}", fg="#198754" if value >= 100.0 else Theme.TEXT_MAIN)
+            self.lbl_global_status.config(text=status_text)
+            if value >= 100.0:
+                self.lbl_global_progress_text.config(text="100.0%")
+        self.after(0, _ui)
+
+    def reset_progress(self, status_text: str = "就绪"):
+        def _ui():
+            self.global_progress_bar.stop()
+            self.global_progress_bar.config(mode="determinate", value=0.0)
+            self.lbl_global_status_icon.config(text="🟢")
+            self.lbl_global_status_text.config(text=f"状态: {status_text}", fg=Theme.TEXT_MUTED)
+            self.lbl_global_progress_text.config(text="0.0%")
+            self.lbl_global_speed_text.config(text="0.0 KB/s")
+        self.after(0, _ui)
 
     def _build_terminal_drawer(self, parent):
         # Header bar of terminal drawer

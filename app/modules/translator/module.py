@@ -478,12 +478,14 @@ class TranslatorModule(BaseAppModule):
         self._is_translating = False
         self.btn_translate.config(text=" 🚀 立即翻译 ", state=tk.NORMAL)
         self.lbl_trans_status.config(text="状态: 操作已由用户手动中断 🛑", foreground="#dc3545")
+        self.context.stop_progress("翻译操作已由用户手动中断 🛑", value=0.0)
 
     def trigger_translation(self):
         text = self.txt_source.get("1.0", tk.END).strip()
         if not text:
             self.txt_target.delete("1.0", tk.END)
             self.lbl_trans_status.config(text="状态: 就绪", foreground=Theme.PRIMARY)
+            self.context.reset_progress("就绪")
             return
 
         # Cancel any previous running worker
@@ -496,7 +498,10 @@ class TranslatorModule(BaseAppModule):
 
         provider_key = self._get_selected_provider_key()
         cur_label = self.var_engine.get()
-        self.lbl_trans_status.config(text=f"状态: 正在通过 [{cur_label.split()[1] if len(cur_label.split()) > 1 else '引擎'}] 翻译...", foreground="#0d6efd")
+        engine_short_name = cur_label.split()[1] if len(cur_label.split()) > 1 else '引擎'
+        status_msg = f"正在通过 [{engine_short_name}] 翻译双语文本..."
+        self.lbl_trans_status.config(text=f"状态: {status_msg}", foreground="#0d6efd")
+        self.context.set_progress_indeterminate(status_msg)
 
         src = self._get_selected_src_code()
         dest = self._get_selected_dest_code()
@@ -526,13 +531,18 @@ class TranslatorModule(BaseAppModule):
         self._is_translating = False
         self.txt_target.delete("1.0", tk.END)
         self.txt_target.insert("1.0", result)
-        self.lbl_trans_status.config(text="状态: 翻译完成 ✓", foreground="#198754")
+        char_count = len(self.txt_source.get("1.0", tk.END).strip())
+        success_msg = f"双语翻译完成 ✓ (共 {char_count} 字)"
+        self.lbl_trans_status.config(text=f"状态: {success_msg}", foreground="#198754")
         self.btn_translate.config(text=" 🚀 立即翻译 ", state=tk.NORMAL)
+        self.context.stop_progress(success_msg, value=100.0)
 
     def _handle_error(self, err_msg: str):
         self._is_translating = False
-        self.lbl_trans_status.config(text=f"状态: 翻译失败 ({err_msg[:20]})", foreground="#dc3545")
+        fail_msg = f"翻译失败 ({err_msg[:20]})"
+        self.lbl_trans_status.config(text=f"状态: {fail_msg}", foreground="#dc3545")
         self.btn_translate.config(text=" 🚀 立即翻译 ", state=tk.NORMAL)
+        self.context.stop_progress(fail_msg, value=0.0)
 
     def on_shutdown(self):
         """Cleans up and signals all workers to stop immediately on app shutdown."""
