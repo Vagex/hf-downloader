@@ -28,7 +28,8 @@ class TranslatorModule(BaseAppModule):
         self.llm_config = {
             "api_key": self.context.config.get("llm_api_key", ""),
             "base_url": self.context.config.get("llm_base_url", "https://api.deepseek.com/v1"),
-            "model": self.context.config.get("llm_model", "deepseek-chat")
+            "model": self.context.config.get("llm_model", "deepseek-chat"),
+            "provider_preset": self.context.config.get("llm_provider_preset", "")
         }
         self.saved_engine_key = self.context.config.get("default_translator_engine", "bing")
         self.saved_src_lang = self.context.config.get("default_src_lang", TranslationEngine.LANGUAGES["auto"])
@@ -38,6 +39,7 @@ class TranslatorModule(BaseAppModule):
         self.context.config.set("llm_api_key", self.llm_config.get("api_key", ""))
         self.context.config.set("llm_base_url", self.llm_config.get("base_url", ""))
         self.context.config.set("llm_model", self.llm_config.get("model", ""))
+        self.context.config.set("llm_provider_preset", self.llm_config.get("provider_preset", ""))
         self.context.config.set("default_translator_engine", self._get_selected_provider_key())
         self.context.config.set("default_src_lang", self.var_src_lang.get())
         self.context.config.set("default_dest_lang", self.var_dest_lang.get())
@@ -259,7 +261,32 @@ class TranslatorModule(BaseAppModule):
             "本地 Ollama (免Key)": ("http://127.0.0.1:11434/v1", "qwen2.5:latest"),
             "自定义 API 端点": ("", "")
         }
-        var_preset = tk.StringVar(value=list(presets.keys())[0])
+        saved_preset = self.llm_config.get("provider_preset", "")
+        saved_url = self.llm_config.get("base_url", "https://api.deepseek.com/v1").strip()
+        
+        init_preset_name = "DeepSeek 官方"
+        if saved_preset and saved_preset in presets:
+            init_preset_name = saved_preset
+        elif saved_url:
+            u_lower = saved_url.lower()
+            if "dashscope" in u_lower or "aliyun" in u_lower:
+                init_preset_name = "阿里通义千问 (DashScope)"
+            elif "openai" in u_lower:
+                init_preset_name = "OpenAI 官方"
+            elif "moonshot" in u_lower or "kimi" in u_lower:
+                init_preset_name = "Moonshot 月之暗面 (Kimi)"
+            elif "bigmodel" in u_lower or "zhipu" in u_lower:
+                init_preset_name = "智谱 AI (GLM)"
+            elif "openrouter" in u_lower:
+                init_preset_name = "OpenRouter 聚合平台"
+            elif "11434" in u_lower or "ollama" in u_lower:
+                init_preset_name = "本地 Ollama (免Key)"
+            elif "deepseek" in u_lower:
+                init_preset_name = "DeepSeek 官方"
+            else:
+                init_preset_name = "自定义 API 端点"
+
+        var_preset = tk.StringVar(value=init_preset_name)
         cb_preset = ttk.Combobox(row0, textvariable=var_preset, values=list(presets.keys()), state="readonly", font=Theme.FONT_BODY)
         cb_preset.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -267,7 +294,7 @@ class TranslatorModule(BaseAppModule):
         row1 = ttk.Frame(f)
         row1.pack(fill=tk.X, pady=3)
         ttk.Label(row1, text="API Base URL:", width=13, font=Theme.FONT_BODY).pack(side=tk.LEFT)
-        var_url = tk.StringVar(value=self.llm_config.get("base_url", "https://api.deepseek.com/v1"))
+        var_url = tk.StringVar(value=saved_url)
         entry_url = ttk.Entry(row1, textvariable=var_url, font=Theme.FONT_BODY)
         entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -376,6 +403,7 @@ class TranslatorModule(BaseAppModule):
         ttk.Label(f, text=tips, font=Theme.FONT_SMALL, foreground=Theme.TEXT_MUTED, justify=tk.LEFT).pack(anchor=tk.W, pady=6)
 
         def _save_and_close():
+            self.llm_config["provider_preset"] = var_preset.get().strip()
             self.llm_config["base_url"] = var_url.get().strip()
             self.llm_config["api_key"] = var_key.get().strip()
             actual_model = var_model.get().strip()
@@ -383,7 +411,7 @@ class TranslatorModule(BaseAppModule):
             self._refresh_engine_combobox(select_key="custom_llm")
             self._save_preferences()
             dlg.destroy()
-            messagebox.showinfo("已保存", f"AI 大模型配置成功！\n\n• 当前生效模型: {actual_model}\n• 翻译引擎已切换为: 🤖 AI 大模型 ({actual_model})\n• 下次启动将自动默认使用该模型！", parent=self.container)
+            messagebox.showinfo("已保存", f"AI 大模型配置成功！\n\n• 服务商预设: {self.llm_config['provider_preset']}\n• 当前生效模型: {actual_model}\n• 翻译引擎已切换为: 🤖 AI 大模型 ({actual_model})\n• 下次启动将自动默认使用该模型！", parent=self.container)
             self.trigger_translation()
 
         btn_box = ttk.Frame(f)
