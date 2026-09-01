@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Import modules to register them with ModuleManager
 import app.modules.downloader.module
 import app.modules.media_tools.module
+import app.modules.translator.module
 import app.modules.settings.module
 
 from app.ui.main_window import MainWindow
