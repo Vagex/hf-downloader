@@ -45,7 +45,7 @@ class TranslatorModule(BaseAppModule):
         ttk.Label(top_ctrl, text="源语言:", font=Theme.FONT_BODY).grid(row=0, column=0, sticky=tk.W, padx=(2, 2), pady=2)
         self.lang_labels = list(TranslationEngine.LANGUAGES.values())
         self.var_src_lang = tk.StringVar(value=self.lang_labels[0]) # Auto
-        self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=16, state="readonly", font=Theme.FONT_BODY)
+        self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=15, state="readonly", font=Theme.FONT_BODY)
         self.cb_src.grid(row=0, column=1, sticky=tk.W, padx=2, pady=2)
         self.cb_src.bind("<<ComboboxSelected>>", lambda e: self.trigger_translation())
 
@@ -54,14 +54,14 @@ class TranslatorModule(BaseAppModule):
         btn_swap.grid(row=0, column=2, padx=2, pady=2)
 
         # Col 3-4: Dest Language
-        ttk.Label(top_ctrl, text="目标:", font=Theme.FONT_BODY).grid(row=0, column=3, sticky=tk.W, padx=(4, 2), pady=2)
+        ttk.Label(top_ctrl, text="目标语言:", font=Theme.FONT_BODY).grid(row=0, column=3, sticky=tk.W, padx=(6, 2), pady=2)
         self.var_dest_lang = tk.StringVar(value=self.lang_labels[1]) # Chinese
-        self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=16, state="readonly", font=Theme.FONT_BODY)
+        self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=15, state="readonly", font=Theme.FONT_BODY)
         self.cb_dest.grid(row=0, column=4, sticky=tk.W, padx=2, pady=2)
         self.cb_dest.bind("<<ComboboxSelected>>", lambda e: self.trigger_translation())
 
-        # Col 5-6: Elastic Auto-Expanding Engine Combobox (weight=1)
-        ttk.Label(top_ctrl, text="引擎:", font=Theme.FONT_BODY).grid(row=0, column=5, sticky=tk.W, padx=(6, 2), pady=2)
+        # Col 5-6: Translation Engine Selector with Ideal Fitted Width (30 chars fits all)
+        ttk.Label(top_ctrl, text="翻译引擎:", font=Theme.FONT_BODY).grid(row=0, column=5, sticky=tk.W, padx=(8, 2), pady=2)
         self.provider_keys = list(TranslationEngine.PROVIDERS.keys())
         self.provider_labels = list(TranslationEngine.PROVIDERS.values())
 
@@ -70,10 +70,11 @@ class TranslatorModule(BaseAppModule):
             top_ctrl, 
             textvariable=self.var_engine, 
             values=self.provider_labels, 
+            width=30,
             state="readonly", 
             font=Theme.FONT_BODY
         )
-        self.cb_engine.grid(row=0, column=6, sticky=tk.EW, padx=4, pady=2)
+        self.cb_engine.grid(row=0, column=6, sticky=tk.W, padx=4, pady=2)
         self.cb_engine.bind("<<ComboboxSelected>>", self._on_engine_changed)
 
         # Col 7: LLM config button
@@ -88,9 +89,6 @@ class TranslatorModule(BaseAppModule):
         # Col 9: Translate Button
         self.btn_translate = ttk.Button(top_ctrl, text=" 🚀 立即翻译 ", command=self.trigger_translation)
         self.btn_translate.grid(row=0, column=9, padx=(4, 2), pady=2)
-
-        # 🌟 Make Column 6 (Engine Combobox) Elastically Auto-expand
-        top_ctrl.columnconfigure(6, weight=1, minsize=200)
 
         # 2. Main Translation Dual-Pane Workspace (Left: Source | Right: Target)
         paned = ttk.PanedWindow(self.container, orient=tk.HORIZONTAL)
