@@ -174,6 +174,48 @@ class TranslationEngine:
         return html.unescape(data.get("responseData", {}).get("translatedText", ""))
 
     @classmethod
+    def fetch_remote_models(cls, base_url: str, api_key: str = "", proxy: Optional[str] = None) -> List[str]:
+        """Fetches the list of available model IDs from OpenAI-compatible /v1/models endpoint."""
+        url = base_url.strip().rstrip("/")
+        if not url:
+            url = "https://api.deepseek.com/v1"
+        if not url.endswith("/models"):
+            url = f"{url}/models"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "SuperTools/2.0"
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        proxies = {"http": proxy, "https": proxy} if proxy else None
+        resp = requests.get(url, headers=headers, proxies=proxies, timeout=12)
+        resp.raise_for_status()
+        data = resp.json()
+
+        models = []
+        if isinstance(data, dict):
+            items = data.get("data") or data.get("models") or []
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict) and "id" in item:
+                        models.append(str(item["id"]))
+                    elif isinstance(item, dict) and "name" in item:
+                        models.append(str(item["name"]))
+                    elif isinstance(item, str):
+                        models.append(item)
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "id" in item:
+                    models.append(str(item["id"]))
+                elif isinstance(item, str):
+                    models.append(item)
+
+        valid_models = sorted(list(set(models)))
+        return valid_models
+
+    @classmethod
     def translate_custom_llm(cls, text: str, src: str = "auto", dest: str = "zh-CN", api_key: str = "", base_url: str = "", model: str = "", proxy: Optional[str] = None) -> str:
         """Translates via OpenAI-compatible AI API (DeepSeek, Qwen, ChatGPT, Ollama)."""
         if not text.strip():

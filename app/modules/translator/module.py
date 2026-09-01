@@ -197,56 +197,129 @@ class TranslatorModule(BaseAppModule):
 
     def _open_llm_config_dialog(self):
         dlg = tk.Toplevel(self.container)
-        dlg.title("🤖 自定义 AI 大模型翻译配置 (OpenAI / DeepSeek / 通义千问)")
-        dlg.geometry("540x360")
-        dlg.minsize(500, 320)
+        dlg.title("🤖 自定义 AI 大模型翻译配置 (自动拉取可用模型)")
+        dlg.geometry("580x420")
+        dlg.minsize(540, 380)
         dlg.transient(self.container.winfo_toplevel())
         dlg.grab_set()
 
         # Center dialog
         sw = dlg.winfo_screenwidth()
         sh = dlg.winfo_screenheight()
-        x = max(40, (sw - 540) // 2)
-        y = max(40, (sh - 360) // 2)
+        x = max(40, (sw - 580) // 2)
+        y = max(40, (sh - 420) // 2)
         dlg.geometry(f"+{x}+{y}")
 
         f = ttk.Frame(dlg, padding="16")
         f.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(f, text="🤖 配置自定义 AI 翻译模型 (支持所有 OpenAI 兼容 API)", font=Theme.FONT_SUBTITLE).pack(anchor=tk.W, pady=(0, 12))
+        ttk.Label(f, text="🤖 配置自定义 AI 翻译模型 (支持自动拉取在线模型)", font=Theme.FONT_SUBTITLE).pack(anchor=tk.W, pady=(0, 10))
+
+        # Provider Presets
+        row0 = ttk.Frame(f)
+        row0.pack(fill=tk.X, pady=3)
+        ttk.Label(row0, text="服务商预设:", width=13, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        
+        presets = {
+            "DeepSeek 官方": ("https://api.deepseek.com/v1", "deepseek-chat"),
+            "阿里通义千问 (DashScope)": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+            "OpenAI 官方": ("https://api.openai.com/v1", "gpt-4o-mini"),
+            "Moonshot 月之暗面 (Kimi)": ("https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+            "智谱 AI (GLM)": ("https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
+            "OpenRouter 聚合平台": ("https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
+            "本地 Ollama (免Key)": ("http://127.0.0.1:11434/v1", "qwen2.5:latest"),
+            "自定义 API 端点": ("", "")
+        }
+        var_preset = tk.StringVar(value=list(presets.keys())[0])
+        cb_preset = ttk.Combobox(row0, textvariable=var_preset, values=list(presets.keys()), state="readonly", font=Theme.FONT_BODY)
+        cb_preset.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Base URL
         row1 = ttk.Frame(f)
-        row1.pack(fill=tk.X, pady=4)
-        ttk.Label(row1, text="API Base URL:", width=14, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        row1.pack(fill=tk.X, pady=3)
+        ttk.Label(row1, text="API Base URL:", width=13, font=Theme.FONT_BODY).pack(side=tk.LEFT)
         var_url = tk.StringVar(value=self.llm_config.get("base_url", "https://api.deepseek.com/v1"))
         entry_url = ttk.Entry(row1, textvariable=var_url, font=Theme.FONT_BODY)
         entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        def _on_preset_change(event=None):
+            p_name = var_preset.get()
+            if p_name in presets and presets[p_name][0]:
+                var_url.set(presets[p_name][0])
+                if presets[p_name][1]:
+                    var_model.set(presets[p_name][1])
+        cb_preset.bind("<<ComboboxSelected>>", _on_preset_change)
+
         # API Key
         row2 = ttk.Frame(f)
-        row2.pack(fill=tk.X, pady=4)
-        ttk.Label(row2, text="API Key:", width=14, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        row2.pack(fill=tk.X, pady=3)
+        ttk.Label(row2, text="API Key:", width=13, font=Theme.FONT_BODY).pack(side=tk.LEFT)
         var_key = tk.StringVar(value=self.llm_config.get("api_key", ""))
         entry_key = ttk.Entry(row2, textvariable=var_key, show="*", font=Theme.FONT_BODY)
         entry_key.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Model Name
+        # Model Name + Auto Fetch Button
         row3 = ttk.Frame(f)
-        row3.pack(fill=tk.X, pady=4)
-        ttk.Label(row3, text="Model Name:", width=14, font=Theme.FONT_BODY).pack(side=tk.LEFT)
+        row3.pack(fill=tk.X, pady=3)
+        ttk.Label(row3, text="Model Name:", width=13, font=Theme.FONT_BODY).pack(side=tk.LEFT)
         var_model = tk.StringVar(value=self.llm_config.get("model", "deepseek-chat"))
-        cb_model = ttk.Combobox(row3, textvariable=var_model, values=["deepseek-chat", "gpt-4o-mini", "qwen-plus", "llama3.3", "custom"], font=Theme.FONT_BODY)
+        cb_model = ttk.Combobox(row3, textvariable=var_model, values=["deepseek-chat", "deepseek-reasoner", "gpt-4o-mini", "qwen-plus", "qwen-max"], font=Theme.FONT_BODY)
         cb_model.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        btn_fetch_models = ttk.Button(row3, text=" 🔄 自动拉取模型 ")
+        btn_fetch_models.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # Status & Help Box
+        lbl_fetch_status = ttk.Label(f, text="就绪 · 支持点击【自动拉取模型】从 API 实时获取账户可用模型列表", font=Theme.FONT_SMALL, foreground=Theme.PRIMARY)
+        lbl_fetch_status.pack(anchor=tk.W, pady=(4, 2))
+
+        def _fetch_models_worker():
+            u = var_url.get().strip()
+            k = var_key.get().strip()
+            if not u:
+                messagebox.showwarning("提示", "请先输入 API Base URL！", parent=dlg)
+                return
+
+            btn_fetch_models.config(state=tk.DISABLED, text=" ⏳ 正在拉取... ")
+            lbl_fetch_status.config(text=f"正在连接 {u}/models 查询账户可用模型...", foreground="#0d6efd")
+
+            def _do_fetch():
+                proxy = self.context.get_proxy()
+                try:
+                    models = TranslationEngine.fetch_remote_models(base_url=u, api_key=k, proxy=proxy)
+                    if models:
+                        def _update_ui():
+                            cb_model["values"] = models
+                            if var_model.get() not in models:
+                                var_model.set(models[0])
+                            lbl_fetch_status.config(text=f"✓ 成功拉取到 {len(models)} 个可用模型！请点击下拉框选择。", foreground="#198754")
+                            btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
+                            messagebox.showinfo("拉取成功", f"成功连接 API 并拉取到 {len(models)} 个可用模型！\n已自动填入下拉选择列表中。", parent=dlg)
+                        dlg.after(0, _update_ui)
+                    else:
+                        def _empty_ui():
+                            lbl_fetch_status.config(text="未解析到模型列表，请手动输入模型名称。", foreground="#dc3545")
+                            btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
+                            messagebox.showwarning("提示", "接口返回数据为空，您可直接在输入框中手动键入模型名称。", parent=dlg)
+                        dlg.after(0, _empty_ui)
+                except Exception as ex:
+                    def _err_ui():
+                        lbl_fetch_status.config(text=f"拉取失败: {str(ex)[:30]}", foreground="#dc3545")
+                        btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
+                        messagebox.showerror("拉取失败", f"无法从目标端点获取模型列表:\n{ex}\n\n💡 检查建议:\n1. 确认 Base URL 格式 (通常形如 https://api.xxx.com/v1)；\n2. 确认 API Key 是否正确有效；\n3. 本地 Ollama 确保服务已在后台启动。", parent=dlg)
+                    dlg.after(0, _err_ui)
+
+            threading.Thread(target=_do_fetch, daemon=True).start()
+
+        btn_fetch_models.config(command=_fetch_models_worker)
 
         # Tips
         tips = (
-            "💡 常用推荐服务配置:\n"
-            "• DeepSeek: https://api.deepseek.com/v1 (模型: deepseek-chat)\n"
-            "• 阿里通义: https://dashscope.aliyuncs.com/compatible-mode/v1 (模型: qwen-plus)\n"
-            "• 本地 Ollama: http://127.0.0.1:11434/v1 (模型: qwen2.5 / llama3.2)"
+            "💡 自动拉取说明:\n"
+            "• 支持任何兼容 OpenAI 规范的平台 (如 DeepSeek、SiliconFlow、OpenRouter、OneAPI、Ollama)\n"
+            "• 点击【自动拉取模型】系统将直接请求 /v1/models 接口并将模型列表呈现在下拉框中"
         )
-        ttk.Label(f, text=tips, font=Theme.FONT_SMALL, foreground=Theme.TEXT_MUTED, justify=tk.LEFT).pack(anchor=tk.W, pady=8)
+        ttk.Label(f, text=tips, font=Theme.FONT_SMALL, foreground=Theme.TEXT_MUTED, justify=tk.LEFT).pack(anchor=tk.W, pady=6)
 
         def _save_and_close():
             self.llm_config["base_url"] = var_url.get().strip()
@@ -259,8 +332,8 @@ class TranslatorModule(BaseAppModule):
             self.trigger_translation()
 
         btn_box = ttk.Frame(f)
-        btn_box.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
-        ttk.Button(btn_box, text=" 💾 保存配置 ", command=_save_and_close).pack(side=tk.RIGHT, padx=4)
+        btn_box.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
+        ttk.Button(btn_box, text=" 💾 保存配置并应用 ", command=_save_and_close).pack(side=tk.RIGHT, padx=4)
         ttk.Button(btn_box, text=" 取消 ", command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
 
     def _get_selected_src_code(self) -> str:
