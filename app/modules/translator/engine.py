@@ -281,9 +281,9 @@ class TranslationEngine:
         return cls.get_offline_preset_models(url), False
 
     @classmethod
-    def translate_custom_llm(cls, text: str, src: str = "auto", dest: str = "zh-CN", api_key: str = "", base_url: str = "", model: str = "", proxy: Optional[str] = None) -> str:
+    def translate_custom_llm(cls, text: str, src: str = "auto", dest: str = "zh-CN", api_key: str = "", base_url: str = "", model: str = "", proxy: Optional[str] = None, cancel_event: Optional[Any] = None) -> str:
         """Translates via OpenAI-compatible AI API (DeepSeek, Qwen, ChatGPT, Ollama)."""
-        if not text.strip():
+        if not text.strip() or (cancel_event and cancel_event.is_set()):
             return ""
         
         endpoint = base_url.rstrip("/") + "/chat/completions" if base_url else "https://api.deepseek.com/v1/chat/completions"
@@ -304,7 +304,7 @@ class TranslationEngine:
             "temperature": 0.3
         }
         proxies = {"http": proxy, "https": proxy} if proxy else None
-        resp = requests.post(endpoint, json=payload, headers=headers, proxies=proxies, timeout=30)
+        resp = requests.post(endpoint, json=payload, headers=headers, proxies=proxies, timeout=16)
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
@@ -317,9 +317,10 @@ class TranslationEngine:
         dest: str = "zh-CN", 
         provider_key: str = "bing", 
         proxy: Optional[str] = None,
-        llm_config: Optional[Dict[str, str]] = None
+        llm_config: Optional[Dict[str, str]] = None,
+        cancel_event: Optional[Any] = None
     ) -> str:
-        """Dispatches translation to chosen provider with intelligent multi-engine fallback."""
+        """Dispatches translation to chosen provider with intelligent multi-engine fallback and instant cancellation support."""
         if not text.strip():
             return ""
 
@@ -329,6 +330,8 @@ class TranslationEngine:
         def _do_translate_single(p_text: str) -> Optional[str]:
             if not p_text.strip():
                 return ""
+            if cancel_event and cancel_event.is_set():
+                return None
             
             # Primary choice
             if provider_key == "bing":
@@ -353,12 +356,18 @@ class TranslationEngine:
                         api_key=llm_config.get("api_key", ""), 
                         base_url=llm_config.get("base_url", ""), 
                         model=llm_config.get("model", ""), 
-                        proxy=proxy
+                        proxy=proxy,
+                        cancel_event=cancel_event
                     )
                 except Exception: pass
 
+            if cancel_event and cancel_event.is_set():
+                return None
+
             # Automatic Fallbacks (Bing -> Youdao -> Baidu -> Google -> MyMemory)
             for fn in (cls.translate_bing, cls.translate_youdao, cls.translate_baidu, cls.translate_google, cls.translate_mymemory):
+                if cancel_event and cancel_event.is_set():
+                    return None
                 try:
                     res = fn(p_text, src, dest, proxy)
                     if res: return res
@@ -367,10 +376,19 @@ class TranslationEngine:
             return None
 
         for p in paragraphs:
+            if cancel_event and cancel_event.is_set():
+                translated_paragraphs.append("[已由用户手动中断 🛑]")
+                break
+
             if not p.strip():
                 translated_paragraphs.append("")
                 continue
+
             res = _do_translate_single(p)
+            if cancel_event and cancel_event.is_set():
+                translated_paragraphs.append("[已由用户手动中断 🛑]")
+                break
+
             if res is None:
                 translated_paragraphs.append(f"[翻译网络异常: 请切换引擎或检查网络] {p}")
             else:

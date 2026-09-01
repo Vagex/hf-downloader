@@ -92,8 +92,8 @@ class TranslatorModule(BaseAppModule):
         chk_rt = ttk.Checkbutton(top_ctrl, text="实时翻译", variable=self.var_realtime)
         chk_rt.grid(row=0, column=8, padx=4, pady=2)
 
-        # Col 9: Translate Button
-        self.btn_translate = ttk.Button(top_ctrl, text=" 🚀 立即翻译 ", command=self.trigger_translation)
+        # Col 9: Translate / Abort Button (Dynamic Switching)
+        self.btn_translate = ttk.Button(top_ctrl, text=" 🚀 立即翻译 ", command=self.toggle_translation)
         self.btn_translate.grid(row=0, column=9, padx=(4, 2), pady=2)
 
         # 2. Main Translation Dual-Pane Workspace (Left: Source | Right: Target)
@@ -309,45 +309,59 @@ class TranslatorModule(BaseAppModule):
         lbl_fetch_status = ttk.Label(f, text="就绪 · 支持免Key直接选择官方模型，或点击【自动拉取模型】联网获取账户所有模型", font=Theme.FONT_SMALL, foreground=Theme.PRIMARY)
         lbl_fetch_status.pack(anchor=tk.W, pady=(4, 2))
 
+        dlg._fetch_cancel_event = None
+        dlg._is_fetching = False
+
         def _fetch_models_worker():
+            if getattr(dlg, "_is_fetching", False):
+                if dlg._fetch_cancel_event:
+                    dlg._fetch_cancel_event.set()
+                dlg._is_fetching = False
+                btn_fetch_models.config(text=" 🔄 自动拉取模型 ")
+                lbl_fetch_status.config(text="已手动取消拉取模型 🛑", foreground="#dc3545")
+                return
+
             u = var_url.get().strip()
             k = var_key.get().strip()
             if not u:
                 messagebox.showwarning("提示", "请先输入 API Base URL！", parent=dlg)
                 return
 
-            btn_fetch_models.config(state=tk.DISABLED, text=" ⏳ 正在拉取... ")
-            lbl_fetch_status.config(text=f"正在连接 {u}/models 查询账户可用模型...", foreground="#0d6efd")
+            dlg._fetch_cancel_event = threading.Event()
+            dlg._is_fetching = True
+            btn_fetch_models.config(text=" 🛑 取消拉取 ")
+            lbl_fetch_status.config(text=f"正在连接 {u}/models 查询账户可用模型 (可点击取消)...", foreground="#0d6efd")
+            cancel_ev = dlg._fetch_cancel_event
 
             def _do_fetch():
                 proxy = self.context.get_proxy()
                 try:
                     models, is_live = TranslationEngine.fetch_remote_models(base_url=u, api_key=k, proxy=proxy)
-                    if models:
+                    if not cancel_ev.is_set():
                         def _update_ui():
-                            cb_model["values"] = models
-                            if var_model.get() not in models:
-                                var_model.set(models[0])
-                            btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
-                            if is_live:
-                                lbl_fetch_status.config(text=f"✓ 成功在线联网拉取到 {len(models)} 个账户可用模型！", foreground="#198754")
-                                messagebox.showinfo("拉取成功", f"成功连接 API 账户并拉取到 {len(models)} 个可用模型！\n已自动填入下拉选择列表中。", parent=dlg)
+                            dlg._is_fetching = False
+                            btn_fetch_models.config(text=" 🔄 自动拉取模型 ")
+                            if models:
+                                cb_model["values"] = models
+                                if var_model.get() not in models:
+                                    var_model.set(models[0])
+                                if is_live:
+                                    lbl_fetch_status.config(text=f"✓ 成功在线联网拉取到 {len(models)} 个账户可用模型！", foreground="#198754")
+                                    messagebox.showinfo("拉取成功", f"成功连接 API 账户并拉取到 {len(models)} 个可用模型！\n已自动填入下拉选择列表中。", parent=dlg)
+                                else:
+                                    lbl_fetch_status.config(text=f"💡 已为您加载该端点的 {len(models)} 款官方精选模型列表！(填入 Key 可联网拉取账户所有专属模型)", foreground="#0d6efd")
+                                    messagebox.showinfo("精选模型已就绪", f"未配置 API Key 或服务端需鉴权。\n\n已为您自动加载该服务商的 {len(models)} 款官方精选模型清单！\n您可直接在下拉框中选择使用。", parent=dlg)
                             else:
-                                lbl_fetch_status.config(text=f"💡 已为您加载该端点的 {len(models)} 款官方精选模型列表！(填入 Key 可联网拉取账户所有专属模型)", foreground="#0d6efd")
-                                messagebox.showinfo("精选模型已就绪", f"未配置 API Key 或服务端需鉴权。\n\n已为您自动加载该服务商的 {len(models)} 款官方精选模型清单！\n您可直接在下拉框中选择使用。", parent=dlg)
+                                lbl_fetch_status.config(text="未解析到模型列表，请手动输入模型名称。", foreground="#dc3545")
                         dlg.after(0, _update_ui)
-                    else:
-                        def _empty_ui():
-                            lbl_fetch_status.config(text="未解析到模型列表，请手动输入模型名称。", foreground="#dc3545")
-                            btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
-                            messagebox.showwarning("提示", "接口返回数据为空，您可直接在输入框中手动键入模型名称。", parent=dlg)
-                        dlg.after(0, _empty_ui)
                 except Exception as ex:
-                    def _err_ui():
-                        lbl_fetch_status.config(text=f"拉取失败: {str(ex)[:30]}", foreground="#dc3545")
-                        btn_fetch_models.config(state=tk.NORMAL, text=" 🔄 自动拉取模型 ")
-                        messagebox.showerror("拉取失败", f"无法从目标端点获取模型列表:\n{ex}\n\n💡 检查建议:\n1. 确认 Base URL 格式 (通常形如 https://api.xxx.com/v1)；\n2. 确认 API Key 是否正确有效；\n3. 本地 Ollama 确保服务已在后台启动。", parent=dlg)
-                    dlg.after(0, _err_ui)
+                    if not cancel_ev.is_set():
+                        def _err_ui():
+                            dlg._is_fetching = False
+                            btn_fetch_models.config(text=" 🔄 自动拉取模型 ")
+                            lbl_fetch_status.config(text=f"拉取失败: {str(ex)[:30]}", foreground="#dc3545")
+                            messagebox.showerror("拉取失败", f"无法从目标端点获取模型列表:\n{ex}\n\n💡 检查建议:\n1. 确认 Base URL 格式 (通常形如 https://api.xxx.com/v1)；\n2. 确认 API Key 是否正确有效；\n3. 本地 Ollama 确保服务已在后台启动。", parent=dlg)
+                        dlg.after(0, _err_ui)
 
             threading.Thread(target=_do_fetch, daemon=True).start()
 
@@ -422,6 +436,21 @@ class TranslatorModule(BaseAppModule):
         lines = len(text.split("\n")) if text else 0
         self.lbl_src_count.config(text=f"字数: {chars} | 段落行数: {lines}")
 
+    def toggle_translation(self):
+        """Toggles between starting translation and instantly aborting the current running translation."""
+        if getattr(self, "_is_translating", False):
+            self.cancel_translation()
+        else:
+            self.trigger_translation()
+
+    def cancel_translation(self):
+        """Immediately aborts any ongoing translation task."""
+        if getattr(self, "_active_cancel_event", None):
+            self._active_cancel_event.set()
+        self._is_translating = False
+        self.btn_translate.config(text=" 🚀 立即翻译 ", state=tk.NORMAL)
+        self.lbl_trans_status.config(text="状态: 操作已由用户手动中断 🛑", foreground="#dc3545")
+
     def trigger_translation(self):
         text = self.txt_source.get("1.0", tk.END).strip()
         if not text:
@@ -429,14 +458,22 @@ class TranslatorModule(BaseAppModule):
             self.lbl_trans_status.config(text="状态: 就绪", foreground=Theme.PRIMARY)
             return
 
-        self.btn_translate.config(state=tk.DISABLED)
+        # Cancel any previous running worker
+        if getattr(self, "_active_cancel_event", None):
+            self._active_cancel_event.set()
+
+        self._active_cancel_event = threading.Event()
+        self._is_translating = True
+        self.btn_translate.config(text=" 🛑 中断翻译 ", state=tk.NORMAL)
+
         provider_key = self._get_selected_provider_key()
-        provider_label = TranslationEngine.PROVIDERS.get(provider_key, "翻译引擎")
-        self.lbl_trans_status.config(text=f"状态: 正在通过 [{provider_label.split()[1]}] 翻译...", foreground="#0d6efd")
+        cur_label = self.var_engine.get()
+        self.lbl_trans_status.config(text=f"状态: 正在通过 [{cur_label.split()[1] if len(cur_label.split()) > 1 else '引擎'}] 翻译...", foreground="#0d6efd")
 
         src = self._get_selected_src_code()
         dest = self._get_selected_dest_code()
         proxy = self.context.get_proxy()
+        cancel_ev = self._active_cancel_event
 
         def _worker():
             try:
@@ -446,23 +483,32 @@ class TranslatorModule(BaseAppModule):
                     dest=dest, 
                     provider_key=provider_key, 
                     proxy=proxy,
-                    llm_config=self.llm_config
+                    llm_config=self.llm_config,
+                    cancel_event=cancel_ev
                 )
-                self.container.after(0, lambda: self._apply_translation_result(res))
+                if not cancel_ev.is_set():
+                    self.container.after(0, lambda: self._apply_translation_result(res))
             except Exception as e:
-                self.container.after(0, lambda: self._handle_error(str(e)))
+                if not cancel_ev.is_set():
+                    self.container.after(0, lambda: self._handle_error(str(e)))
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _apply_translation_result(self, result: str):
+        self._is_translating = False
         self.txt_target.delete("1.0", tk.END)
         self.txt_target.insert("1.0", result)
         self.lbl_trans_status.config(text="状态: 翻译完成 ✓", foreground="#198754")
-        self.btn_translate.config(state=tk.NORMAL)
+        self.btn_translate.config(text=" 🚀 立即翻译 ", state=tk.NORMAL)
 
     def _handle_error(self, err_msg: str):
+        self._is_translating = False
         self.lbl_trans_status.config(text=f"状态: 翻译失败 ({err_msg[:20]})", foreground="#dc3545")
-        self.btn_translate.config(state=tk.NORMAL)
+        self.btn_translate.config(text=" 🚀 立即翻译 ", state=tk.NORMAL)
+
+    def on_shutdown(self):
+        """Cleans up and signals all workers to stop immediately on app shutdown."""
+        self.cancel_translation()
 
     def _clear_src(self):
         self.txt_source.delete("1.0", tk.END)
