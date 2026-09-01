@@ -3727,8 +3727,40 @@ class HFDownloaderView(ttk.Frame):
 
     # ------------------ Tab 1: Dual-Pane File Browser with Checkbox UI ------------------
     def _build_tab_browse(self):
+        # 1. Bottom Action Bar of Tab 1 (Docked first at bottom to always guarantee 100% visibility)
+        browse_act_frame = ttk.Frame(self.tab_browse)
+        browse_act_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        self.btn_add_to_queue = ttk.Button(
+            browse_act_frame, 
+            text=" 加入下载队列", 
+            image=self.icons["download"],
+            compound=tk.LEFT,
+            command=self.add_selected_to_queue
+        )
+        self.btn_add_to_queue.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        btn_add_entire_dir = ttk.Button(
+            browse_act_frame, 
+            text=" 目录整包入队", 
+            image=self.icons["folder"],
+            compound=tk.LEFT,
+            command=self.add_current_dir_to_queue
+        )
+        btn_add_entire_dir.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        btn_add_and_jump = ttk.Button(
+            browse_act_frame, 
+            text=" 入队并跳转", 
+            image=self.icons["rocket"],
+            compound=tk.LEFT,
+            command=lambda: self.add_selected_to_queue(jump=True)
+        )
+        btn_add_and_jump.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        # 2. Main Vertical PanedWindow (Fills remaining workspace above action buttons)
         self.browse_paned_v = ttk.PanedWindow(self.tab_browse, orient=tk.VERTICAL)
-        self.browse_paned_v.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.browse_paned_v.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 2))
 
         # Upper Pane: Configuration Area
         self.browse_pane_upper = ttk.Frame(self.browse_paned_v)
@@ -3950,37 +3982,6 @@ class HFDownloaderView(ttk.Frame):
         self.tree_files.bind("<Button-1>", self._on_file_tree_click)
         self.tree_files.bind("<space>", self._on_file_tree_space)
 
-        # Bottom Action Bar of Tab 1
-        browse_act_frame = ttk.Frame(self.tab_browse)
-        browse_act_frame.pack(fill=tk.X, pady=(4, 0))
-
-        self.btn_add_to_queue = ttk.Button(
-            browse_act_frame, 
-            text=" 加入下载队列", 
-            image=self.icons["download"],
-            compound=tk.LEFT,
-            command=self.add_selected_to_queue
-        )
-        self.btn_add_to_queue.pack(side=tk.LEFT, padx=4, ipady=3)
-
-        btn_add_entire_dir = ttk.Button(
-            browse_act_frame, 
-            text=" 目录整包入队", 
-            image=self.icons["folder"],
-            compound=tk.LEFT,
-            command=self.add_current_dir_to_queue
-        )
-        btn_add_entire_dir.pack(side=tk.LEFT, padx=4, ipady=3)
-
-        btn_add_and_jump = ttk.Button(
-            browse_act_frame, 
-            text=" 入队并跳转", 
-            image=self.icons["rocket"],
-            compound=tk.LEFT,
-            command=lambda: self.add_selected_to_queue(jump=True)
-        )
-        btn_add_and_jump.pack(side=tk.LEFT, padx=4, ipady=3)
-
     # ------------------ Tab 1 Checkbox Click & Toggle Events ------------------
     def _on_file_tree_click(self, event):
         region = self.tree_files.identify("region", event.x, event.y)
@@ -4048,8 +4049,31 @@ class HFDownloaderView(ttk.Frame):
 
     # ------------------ Tab 2: GitHub Repository & Release Asset Explorer ------------------
     def _build_tab_github(self):
+        # 1. Bottom Actions Bar (Docked first at bottom to always guarantee 100% visibility)
+        gh_act_frame = ttk.Frame(self.tab_github)
+        gh_act_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        btn_gh_add_q = ttk.Button(
+            gh_act_frame, text=" 加入统一下载队列", image=self.icons["download"], compound=tk.LEFT,
+            command=lambda: self.add_github_to_queue(jump=False)
+        )
+        btn_gh_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        btn_gh_zip = ttk.Button(
+            gh_act_frame, text=" 下载整包源码 Zip (含加速)", image=self.icons["rocket"], compound=tk.LEFT,
+            command=self.download_github_repo_zip
+        )
+        btn_gh_zip.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        btn_gh_add_jump = ttk.Button(
+            gh_act_frame, text=" 入队并跳转到队列", image=self.icons["play"], compound=tk.LEFT,
+            command=lambda: self.add_github_to_queue(jump=True)
+        )
+        btn_gh_add_jump.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        # 2. Main Vertical PanedWindow (Fills remaining workspace above action buttons)
         self.gh_paned_v = ttk.PanedWindow(self.tab_github, orient=tk.VERTICAL)
-        self.gh_paned_v.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.gh_paned_v.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 2))
 
         # Upper Pane: GitHub Configuration Card
         pane_upper = ttk.Frame(self.gh_paned_v)
@@ -4246,28 +4270,6 @@ class HFDownloaderView(ttk.Frame):
 
         self.tree_gh_files.bind("<Button-1>", self._on_gh_tree_click)
         self.tree_gh_files.bind("<space>", self._on_gh_tree_space)
-
-        # Bottom Actions Bar
-        gh_act_frame = ttk.Frame(self.tab_github)
-        gh_act_frame.pack(fill=tk.X, pady=(4, 0))
-
-        btn_gh_add_q = ttk.Button(
-            gh_act_frame, text=" 加入统一下载队列", image=self.icons["download"], compound=tk.LEFT,
-            command=lambda: self.add_github_to_queue(jump=False)
-        )
-        btn_gh_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
-
-        btn_gh_zip = ttk.Button(
-            gh_act_frame, text=" 下载整包源码 Zip (含加速)", image=self.icons["rocket"], compound=tk.LEFT,
-            command=self.download_github_repo_zip
-        )
-        btn_gh_zip.pack(side=tk.LEFT, padx=4, ipady=3)
-
-        btn_gh_add_jump = ttk.Button(
-            gh_act_frame, text=" 入队并跳转到队列", image=self.icons["play"], compound=tk.LEFT,
-            command=lambda: self.add_github_to_queue(jump=True)
-        )
-        btn_gh_add_jump.pack(side=tk.LEFT, padx=4, ipady=3)
 
         self.raw_gh_items = {}  # key -> item metadata
         self.checked_gh_items = set()
@@ -4810,8 +4812,25 @@ class HFDownloaderView(ttk.Frame):
 
     # ------------------ Tab 3: Universal Media Video Downloader UI & Handlers ------------------
     def _build_tab_twitter(self):
+        # 1. Bottom Actions Bar of Tab 3 (Docked first at bottom to always guarantee 100% visibility)
+        tw_act_frame = ttk.Frame(self.tab_twitter)
+        tw_act_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        btn_tw_add_q = ttk.Button(
+            tw_act_frame, text=" 加入统一下载队列", image=self.icons["download"], compound=tk.LEFT,
+            command=lambda: self.add_twitter_to_queue(jump=False)
+        )
+        btn_tw_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        btn_tw_add_jump = ttk.Button(
+            tw_act_frame, text=" 入队并跳转到队列", image=self.icons["rocket"], compound=tk.LEFT,
+            command=lambda: self.add_twitter_to_queue(jump=True)
+        )
+        btn_tw_add_jump.pack(side=tk.LEFT, padx=4, ipady=3)
+
+        # 2. Main Vertical PanedWindow (Fills remaining workspace above action buttons)
         self.tw_paned_v = ttk.PanedWindow(self.tab_twitter, orient=tk.VERTICAL)
-        self.tw_paned_v.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.tw_paned_v.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 2))
 
         # Upper Area: Config Panel & Media Summary Card
         tw_upper = ttk.Frame(self.tw_paned_v)
@@ -4987,22 +5006,6 @@ class HFDownloaderView(ttk.Frame):
         self.tree_tw_variants.bind("<space>", self._on_tw_tree_space)
         self.tree_tw_variants.bind("<Double-1>", lambda e: self.preview_twitter_video())
         self.tree_tw_variants.bind("<Button-3>", self._show_tw_context_menu)
-
-        # Bottom Actions Bar of Tab 3
-        tw_act_frame = ttk.Frame(self.tab_twitter)
-        tw_act_frame.pack(fill=tk.X, pady=(4, 0))
-
-        btn_tw_add_q = ttk.Button(
-            tw_act_frame, text=" 加入统一下载队列", image=self.icons["download"], compound=tk.LEFT,
-            command=lambda: self.add_twitter_to_queue(jump=False)
-        )
-        btn_tw_add_q.pack(side=tk.LEFT, padx=4, ipady=3)
-
-        btn_tw_add_jump = ttk.Button(
-            tw_act_frame, text=" 入队并跳转到队列", image=self.icons["rocket"], compound=tk.LEFT,
-            command=lambda: self.add_twitter_to_queue(jump=True)
-        )
-        btn_tw_add_jump.pack(side=tk.LEFT, padx=4, ipady=3)
 
         self.tw_resolved_data = None
         self.checked_tw_variants: Set[int] = set()
@@ -5387,7 +5390,7 @@ class HFDownloaderView(ttk.Frame):
     # ------------------ Tab 4: Download Queue UI with Checkboxes ------------------
     def _build_tab_queue(self):
         self.queue_info_bar = ttk.Frame(self.tab_queue)
-        self.queue_info_bar.pack(fill=tk.X, pady=(0, 4))
+        self.queue_info_bar.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
 
         self.lbl_queue_stats = ttk.Label(self.queue_info_bar, text="正在检测任务状态...", foreground="#333333", font=FONT_BOLD)
         self.lbl_queue_stats.pack(side=tk.LEFT)
@@ -5401,9 +5404,43 @@ class HFDownloaderView(ttk.Frame):
         btn_rescan = ttk.Button(self.queue_info_bar, text=" 重新扫描本地状态", image=self.icons["bolt"], compound=tk.LEFT, width=17, command=self.rescan_all_tasks)
         btn_rescan.pack(side=tk.RIGHT)
 
-        # PanedWindow in Tab 2
+        # 1. Queue control buttons bar (Docked first at bottom to guarantee 100% visibility)
+        q_btn_bar = ttk.Frame(self.tab_queue)
+        q_btn_bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        self.btn_start_queue = ttk.Button(q_btn_bar, text=" 开始/恢复", image=self.icons["play"], compound=tk.LEFT, command=self.start_queue_download)
+        self.btn_start_queue.pack(side=tk.LEFT, padx=3, ipady=3)
+
+        self.btn_stop_queue = ttk.Button(q_btn_bar, text=" 暂停/终止", image=self.icons["pause"], compound=tk.LEFT, command=self.stop_queue_download, state=tk.DISABLED)
+        self.btn_stop_queue.pack(side=tk.LEFT, padx=3, ipady=3)
+
+        btn_hide_bg = ttk.Button(q_btn_bar, text=" 隐藏后台运行", image=self.icons["rocket"], compound=tk.LEFT, command=self.hide_to_background)
+        btn_hide_bg.pack(side=tk.LEFT, padx=3, ipady=3)
+
+        btn_remove_sel = ttk.Button(q_btn_bar, text=" 移除勾选任务", image=self.icons["trash"], compound=tk.LEFT, command=self.remove_selected_tasks)
+        btn_remove_sel.pack(side=tk.LEFT, padx=3, ipady=3)
+
+        btn_clear_done = ttk.Button(q_btn_bar, text=" 清理已完成", image=self.icons["clean"], compound=tk.LEFT, command=self.clear_completed_tasks)
+        btn_clear_done.pack(side=tk.LEFT, padx=3, ipady=3)
+
+        btn_clear_all = ttk.Button(q_btn_bar, text=" 清空全部", image=self.icons["trash"], compound=tk.LEFT, command=self.clear_all_tasks)
+        btn_clear_all.pack(side=tk.LEFT, padx=3, ipady=3)
+
+        self.show_log_var = tk.BooleanVar(value=True)
+        chk_show_log = ttk.Checkbutton(
+            q_btn_bar, 
+            text="显示运行日志", 
+            variable=self.show_log_var, 
+            command=self._toggle_log_view
+        )
+        chk_show_log.pack(side=tk.LEFT, padx=10)
+
+        btn_open_task_folder = ttk.Button(q_btn_bar, text=" 打开所在文件夹", image=self.icons["folder"], compound=tk.LEFT, command=self.open_selected_task_folder)
+        btn_open_task_folder.pack(side=tk.RIGHT, padx=3, ipady=3)
+
+        # 2. Main PanedWindow (Fills middle workspace between top info bar and bottom button bar)
         self.queue_paned = ttk.PanedWindow(self.tab_queue, orient=tk.VERTICAL)
-        self.queue_paned.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self.queue_paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 2))
 
         # Upper pane: Queue table frame
         self.queue_pane_upper = ttk.Frame(self.queue_paned)
@@ -5487,40 +5524,6 @@ class HFDownloaderView(ttk.Frame):
 
         self.log_text = tk.Text(self.queue_pane_lower, height=5, wrap=tk.WORD, font=FONT_LOG)
         self.log_text.pack(fill=tk.BOTH, expand=True)
-
-        # Queue control buttons bar
-        q_btn_bar = ttk.Frame(self.tab_queue)
-        q_btn_bar.pack(fill=tk.X, pady=(4, 0))
-
-        self.btn_start_queue = ttk.Button(q_btn_bar, text=" 开始/恢复", image=self.icons["play"], compound=tk.LEFT, command=self.start_queue_download)
-        self.btn_start_queue.pack(side=tk.LEFT, padx=3, ipady=3)
-
-        self.btn_stop_queue = ttk.Button(q_btn_bar, text=" 暂停/终止", image=self.icons["pause"], compound=tk.LEFT, command=self.stop_queue_download, state=tk.DISABLED)
-        self.btn_stop_queue.pack(side=tk.LEFT, padx=3, ipady=3)
-
-        btn_hide_bg = ttk.Button(q_btn_bar, text=" 隐藏后台运行", image=self.icons["rocket"], compound=tk.LEFT, command=self.hide_to_background)
-        btn_hide_bg.pack(side=tk.LEFT, padx=3, ipady=3)
-
-        btn_remove_sel = ttk.Button(q_btn_bar, text=" 移除勾选任务", image=self.icons["trash"], compound=tk.LEFT, command=self.remove_selected_tasks)
-        btn_remove_sel.pack(side=tk.LEFT, padx=3, ipady=3)
-
-        btn_clear_done = ttk.Button(q_btn_bar, text=" 清理已完成", image=self.icons["clean"], compound=tk.LEFT, command=self.clear_completed_tasks)
-        btn_clear_done.pack(side=tk.LEFT, padx=3, ipady=3)
-
-        btn_clear_all = ttk.Button(q_btn_bar, text=" 清空全部", image=self.icons["trash"], compound=tk.LEFT, command=self.clear_all_tasks)
-        btn_clear_all.pack(side=tk.LEFT, padx=3, ipady=3)
-
-        self.show_log_var = tk.BooleanVar(value=True)
-        chk_show_log = ttk.Checkbutton(
-            q_btn_bar, 
-            text="显示运行日志", 
-            variable=self.show_log_var, 
-            command=self._toggle_log_view
-        )
-        chk_show_log.pack(side=tk.LEFT, padx=10)
-
-        btn_open_task_folder = ttk.Button(q_btn_bar, text=" 打开所在文件夹", image=self.icons["folder"], compound=tk.LEFT, command=self.open_selected_task_folder)
-        btn_open_task_folder.pack(side=tk.RIGHT, padx=3, ipady=3)
 
     # ------------------ Tab 2 Checkbox Click & Toggle Events ------------------
     def _on_queue_tree_click(self, event):
@@ -5874,6 +5877,16 @@ class HFDownloaderView(ttk.Frame):
 
     # ------------------ Bottom Global Progress Panel ------------------
     def _build_bottom_panel(self, parent):
+        if getattr(self, "is_embedded", False):
+            # In embedded mode inside MainWindow platform, MainWindow's bottom GlobalProgressPanel is active.
+            # Create headless proxy widgets so internal callbacks continue to work while freeing all vertical space for tables and buttons.
+            self.progress_var = tk.DoubleVar(value=0.0)
+            self.progress_bar = ttk.Progressbar(parent)
+            self.lbl_progress_text = ttk.Label(parent)
+            self.lbl_speed_text = ttk.Label(parent)
+            self.lbl_status = ttk.Label(parent)
+            return
+
         prog_frame = ttk.LabelFrame(parent, text=" 📊 实时任务与网络进度 ", padding="8")
         prog_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
 
