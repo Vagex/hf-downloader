@@ -20,21 +20,27 @@ class TranslatorModule(BaseAppModule):
 
     def create_view(self, parent: tk.Widget) -> tk.Widget:
         self.container = ttk.Frame(parent, padding="8")
-        self._load_llm_config()
+        self._load_preferences()
         self._build_ui()
         return self.container
 
-    def _load_llm_config(self):
+    def _load_preferences(self):
         self.llm_config = {
             "api_key": self.context.config.get("llm_api_key", ""),
             "base_url": self.context.config.get("llm_base_url", "https://api.deepseek.com/v1"),
             "model": self.context.config.get("llm_model", "deepseek-chat")
         }
+        self.saved_engine_key = self.context.config.get("default_translator_engine", "bing")
+        self.saved_src_lang = self.context.config.get("default_src_lang", TranslationEngine.LANGUAGES["auto"])
+        self.saved_dest_lang = self.context.config.get("default_dest_lang", TranslationEngine.LANGUAGES["zh-CN"])
 
-    def _save_llm_config(self):
+    def _save_preferences(self):
         self.context.config.set("llm_api_key", self.llm_config.get("api_key", ""))
         self.context.config.set("llm_base_url", self.llm_config.get("base_url", ""))
         self.context.config.set("llm_model", self.llm_config.get("model", ""))
+        self.context.config.set("default_translator_engine", self._get_selected_provider_key())
+        self.context.config.set("default_src_lang", self.var_src_lang.get())
+        self.context.config.set("default_dest_lang", self.var_dest_lang.get())
 
     def _build_ui(self):
         # 1. Top Control Bar (Responsive Elastic Grid Layout)
@@ -44,10 +50,11 @@ class TranslatorModule(BaseAppModule):
         # Col 0-1: Source Language
         ttk.Label(top_ctrl, text="源语言:", font=Theme.FONT_BODY).grid(row=0, column=0, sticky=tk.W, padx=(2, 2), pady=2)
         self.lang_labels = list(TranslationEngine.LANGUAGES.values())
-        self.var_src_lang = tk.StringVar(value=self.lang_labels[0]) # Auto
+        init_src = self.saved_src_lang if self.saved_src_lang in self.lang_labels else self.lang_labels[0]
+        self.var_src_lang = tk.StringVar(value=init_src) # Auto
         self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=15, state="readonly", font=Theme.FONT_BODY)
         self.cb_src.grid(row=0, column=1, sticky=tk.W, padx=2, pady=2)
-        self.cb_src.bind("<<ComboboxSelected>>", lambda e: self.trigger_translation())
+        self.cb_src.bind("<<ComboboxSelected>>", lambda e: (self._save_preferences(), self.trigger_translation()))
 
         # Col 2: Swap button
         btn_swap = ttk.Button(top_ctrl, text=" ⇄ ", width=4, command=self._swap_languages)
@@ -55,17 +62,19 @@ class TranslatorModule(BaseAppModule):
 
         # Col 3-4: Dest Language
         ttk.Label(top_ctrl, text="目标语言:", font=Theme.FONT_BODY).grid(row=0, column=3, sticky=tk.W, padx=(6, 2), pady=2)
-        self.var_dest_lang = tk.StringVar(value=self.lang_labels[1]) # Chinese
+        init_dest = self.saved_dest_lang if self.saved_dest_lang in self.lang_labels else self.lang_labels[1]
+        self.var_dest_lang = tk.StringVar(value=init_dest) # Chinese
         self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=15, state="readonly", font=Theme.FONT_BODY)
         self.cb_dest.grid(row=0, column=4, sticky=tk.W, padx=2, pady=2)
-        self.cb_dest.bind("<<ComboboxSelected>>", lambda e: self.trigger_translation())
+        self.cb_dest.bind("<<ComboboxSelected>>", lambda e: (self._save_preferences(), self.trigger_translation()))
 
-        # Col 5-6: Translation Engine Selector with Ideal Fitted Width (30 chars fits all)
+        # Col 5-6: Translation Engine Selector
         ttk.Label(top_ctrl, text="翻译引擎:", font=Theme.FONT_BODY).grid(row=0, column=5, sticky=tk.W, padx=(8, 2), pady=2)
         self.provider_keys = list(TranslationEngine.PROVIDERS.keys())
         self.provider_labels = list(TranslationEngine.PROVIDERS.values())
 
-        self.var_engine = tk.StringVar(value=self.provider_labels[0]) # Default: Bing
+        default_engine_label = TranslationEngine.PROVIDERS.get(self.saved_engine_key, self.provider_labels[0])
+        self.var_engine = tk.StringVar(value=default_engine_label)
         self.cb_engine = ttk.Combobox(
             top_ctrl, 
             textvariable=self.var_engine, 
@@ -190,6 +199,7 @@ class TranslatorModule(BaseAppModule):
         return "bing"
 
     def _on_engine_changed(self, event=None):
+        self._save_preferences()
         if self._get_selected_provider_key() == "custom_llm" and not self.llm_config.get("api_key"):
             self._open_llm_config_dialog()
         else:
@@ -325,10 +335,10 @@ class TranslatorModule(BaseAppModule):
             self.llm_config["base_url"] = var_url.get().strip()
             self.llm_config["api_key"] = var_key.get().strip()
             self.llm_config["model"] = var_model.get().strip()
-            self._save_llm_config()
             self.var_engine.set(TranslationEngine.PROVIDERS["custom_llm"])
+            self._save_preferences()
             dlg.destroy()
-            messagebox.showinfo("已保存", "AI 大模型翻译配置已保存成功！", parent=self.container)
+            messagebox.showinfo("已保存", f"AI 大模型配置成功！\n\n• 当前模型: {self.llm_config['model']}\n• 默认引擎已锁定为: DeepSeek/AI 大模型\n• 下次启动应用将自动默认使用该引擎！", parent=self.container)
             self.trigger_translation()
 
         btn_box = ttk.Frame(f)
