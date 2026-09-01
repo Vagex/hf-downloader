@@ -141,8 +141,12 @@ class MediaToolsModule(BaseAppModule):
         self._log(f"    源文件: {src_path}")
         self._log(f"    输出目标: {target_out}")
         
+        fname = os.path.basename(src_path)
+        self.context.set_progress_indeterminate(f"正在处理媒体文件: {fname}...")
+        
         # Simple simulated ffmpeg dispatch
         self._log(f"[✓] 媒体处理指令已派发，输出路径: {target_out}")
+        self.context.stop_progress(f"媒体处理完成 ✓ ({os.path.basename(target_out)})", 100.0)
         messagebox.showinfo("处理成功", f"媒体操作已就绪！\n输出目标: {target_out}")
 
 ModuleManager.register(MediaToolsModule)

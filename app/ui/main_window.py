@@ -419,6 +419,14 @@ class MainWindow(tk.Tk):
         self.lbl_active_tab.config(text=f"  📁 当前功能: {mod.name}")
         self.lbl_global_status.config(text=f"{mod.description}")
 
+        # Update and reset bottom global status bar for this specific module
+        self.lbl_global_status_icon.config(text="🟢")
+        self.lbl_global_status_text.config(text=f"状态: {mod.name} 就绪", fg=Theme.TEXT_MAIN)
+        self.lbl_global_progress_text.config(text="0.0%")
+        self.lbl_global_speed_text.config(text="0.0 KB/s")
+        self.global_progress_bar.stop()
+        self.global_progress_bar.config(mode="determinate", value=0.0)
+
     def _on_top_proxy_changed(self, event=None):
         val = self.var_top_proxy.get().strip()
         self.context.config.set("proxy", val)
