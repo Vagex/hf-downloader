@@ -37,30 +37,29 @@ class TranslatorModule(BaseAppModule):
         self.context.config.set("llm_model", self.llm_config.get("model", ""))
 
     def _build_ui(self):
-        # 1. Top Control Bar (Language Selector, Engine Selector, Auto-Translate Toggle, LLM Config)
+        # 1. Top Control Bar (Responsive Elastic Grid Layout)
         top_ctrl = ttk.LabelFrame(self.container, text=" 🌐 翻译引擎与语言配置 ", padding="6")
         top_ctrl.pack(fill=tk.X, pady=(0, 6))
 
-        # Source Language
-        ttk.Label(top_ctrl, text="源语言:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(4, 2))
+        # Col 0-1: Source Language
+        ttk.Label(top_ctrl, text="源语言:", font=Theme.FONT_BODY).grid(row=0, column=0, sticky=tk.W, padx=(2, 2), pady=2)
         self.lang_labels = list(TranslationEngine.LANGUAGES.values())
-
         self.var_src_lang = tk.StringVar(value=self.lang_labels[0]) # Auto
-        self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=15, state="readonly", font=Theme.FONT_BODY)
-        self.cb_src.pack(side=tk.LEFT, padx=4)
+        self.cb_src = ttk.Combobox(top_ctrl, textvariable=self.var_src_lang, values=self.lang_labels, width=13, state="readonly", font=Theme.FONT_BODY)
+        self.cb_src.grid(row=0, column=1, sticky=tk.W, padx=2, pady=2)
 
-        # Swap button
-        btn_swap = ttk.Button(top_ctrl, text=" ⇄ 互换 ", command=self._swap_languages)
-        btn_swap.pack(side=tk.LEFT, padx=4)
+        # Col 2: Swap button
+        btn_swap = ttk.Button(top_ctrl, text=" ⇄ ", width=4, command=self._swap_languages)
+        btn_swap.grid(row=0, column=2, padx=2, pady=2)
 
-        # Dest Language
-        ttk.Label(top_ctrl, text="目标语言:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(4, 2))
+        # Col 3-4: Dest Language
+        ttk.Label(top_ctrl, text="目标:", font=Theme.FONT_BODY).grid(row=0, column=3, sticky=tk.W, padx=(4, 2), pady=2)
         self.var_dest_lang = tk.StringVar(value=self.lang_labels[1]) # Chinese
-        self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=15, state="readonly", font=Theme.FONT_BODY)
-        self.cb_dest.pack(side=tk.LEFT, padx=4)
+        self.cb_dest = ttk.Combobox(top_ctrl, textvariable=self.var_dest_lang, values=self.lang_labels[1:], width=13, state="readonly", font=Theme.FONT_BODY)
+        self.cb_dest.grid(row=0, column=4, sticky=tk.W, padx=2, pady=2)
 
-        # Engine selector
-        ttk.Label(top_ctrl, text="翻译引擎:", font=Theme.FONT_BODY).pack(side=tk.LEFT, padx=(10, 2))
+        # Col 5-6: Elastic Auto-Expanding Engine Combobox (weight=1)
+        ttk.Label(top_ctrl, text="引擎:", font=Theme.FONT_BODY).grid(row=0, column=5, sticky=tk.W, padx=(6, 2), pady=2)
         self.provider_keys = list(TranslationEngine.PROVIDERS.keys())
         self.provider_labels = list(TranslationEngine.PROVIDERS.values())
 
@@ -69,24 +68,27 @@ class TranslatorModule(BaseAppModule):
             top_ctrl, 
             textvariable=self.var_engine, 
             values=self.provider_labels, 
-            width=28, 
             state="readonly", 
             font=Theme.FONT_BODY
         )
-        self.cb_engine.pack(side=tk.LEFT, padx=4)
+        self.cb_engine.grid(row=0, column=6, sticky=tk.EW, padx=4, pady=2)
         self.cb_engine.bind("<<ComboboxSelected>>", self._on_engine_changed)
 
-        btn_llm_cfg = ttk.Button(top_ctrl, text=" 🤖 AI大模型配置...", command=self._open_llm_config_dialog)
-        btn_llm_cfg.pack(side=tk.LEFT, padx=4)
+        # Col 7: LLM config button
+        btn_llm_cfg = ttk.Button(top_ctrl, text=" 🤖 AI配置...", command=self._open_llm_config_dialog)
+        btn_llm_cfg.grid(row=0, column=7, padx=2, pady=2)
 
-        # Translate Button
-        self.btn_translate = ttk.Button(top_ctrl, text=" 🚀 立即翻译 ", command=self.trigger_translation)
-        self.btn_translate.pack(side=tk.RIGHT, padx=6)
-
-        # Real-time translation check
+        # Col 8: Real-time checkbox
         self.var_realtime = tk.BooleanVar(value=True)
-        chk_rt = ttk.Checkbutton(top_ctrl, text="输入时实时自动翻译", variable=self.var_realtime)
-        chk_rt.pack(side=tk.RIGHT, padx=6)
+        chk_rt = ttk.Checkbutton(top_ctrl, text="实时翻译", variable=self.var_realtime)
+        chk_rt.grid(row=0, column=8, padx=4, pady=2)
+
+        # Col 9: Translate Button
+        self.btn_translate = ttk.Button(top_ctrl, text=" 🚀 立即翻译 ", command=self.trigger_translation)
+        self.btn_translate.grid(row=0, column=9, padx=(4, 2), pady=2)
+
+        # 🌟 Make Column 6 (Engine Combobox) Elastically Auto-expand
+        top_ctrl.columnconfigure(6, weight=1, minsize=200)
 
         # 2. Main Translation Dual-Pane Workspace (Left: Source | Right: Target)
         paned = ttk.PanedWindow(self.container, orient=tk.HORIZONTAL)
