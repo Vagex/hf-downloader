@@ -14,8 +14,17 @@ class TranslationEngine:
         "baidu": "🟢 百度 极速翻译 (国内直连·免Key)",
         "google": "🔵 谷歌 Google 翻译 (需代理/海外)",
         "mymemory": "🔵 MyMemory 翻译 (开源多语种)",
-        "custom_llm": "🤖 自定义 AI 大模型翻译 (DeepSeek/OpenAI)"
+        "custom_llm": "🤖 自定义 AI 大模型翻译"
     }
+
+    @classmethod
+    def get_provider_display_name(cls, provider_key: str, model_name: Optional[str] = None) -> str:
+        """Dynamically returns the provider display label reflecting the actual selected AI model name."""
+        if provider_key == "custom_llm":
+            if model_name and model_name.strip():
+                return f"🤖 AI 大模型 ({model_name.strip()})"
+            return "🤖 自定义 AI 大模型翻译"
+        return cls.PROVIDERS.get(provider_key, "未知翻译引擎")
 
     LANGUAGES = {
         "auto": "🌐 自动检测语言",

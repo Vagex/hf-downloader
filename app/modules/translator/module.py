@@ -68,21 +68,18 @@ class TranslatorModule(BaseAppModule):
         self.cb_dest.grid(row=0, column=4, sticky=tk.W, padx=2, pady=2)
         self.cb_dest.bind("<<ComboboxSelected>>", lambda e: (self._save_preferences(), self.trigger_translation()))
 
-        # Col 5-6: Translation Engine Selector
+        # Col 5-6: Translation Engine Selector with Dynamic AI Model Label
         ttk.Label(top_ctrl, text="翻译引擎:", font=Theme.FONT_BODY).grid(row=0, column=5, sticky=tk.W, padx=(8, 2), pady=2)
         self.provider_keys = list(TranslationEngine.PROVIDERS.keys())
-        self.provider_labels = list(TranslationEngine.PROVIDERS.values())
 
-        default_engine_label = TranslationEngine.PROVIDERS.get(self.saved_engine_key, self.provider_labels[0])
-        self.var_engine = tk.StringVar(value=default_engine_label)
+        # Build dynamic provider list
         self.cb_engine = ttk.Combobox(
             top_ctrl, 
-            textvariable=self.var_engine, 
-            values=self.provider_labels, 
             width=30,
             state="readonly", 
             font=Theme.FONT_BODY
         )
+        self._refresh_engine_combobox()
         self.cb_engine.grid(row=0, column=6, sticky=tk.W, padx=4, pady=2)
         self.cb_engine.bind("<<ComboboxSelected>>", self._on_engine_changed)
 
@@ -191,8 +188,30 @@ class TranslatorModule(BaseAppModule):
         # Real-time debounce timer
         self._debounce_timer = None
 
+    def _refresh_engine_combobox(self, select_key: Optional[str] = None):
+        """Dynamically refreshes the engine combobox values, embedding the actual configured model name."""
+        cur_model = self.llm_config.get("model", "")
+        self.provider_labels = []
+        for k in self.provider_keys:
+            self.provider_labels.append(TranslationEngine.get_provider_display_name(k, cur_model))
+
+        self.cb_engine["values"] = self.provider_labels
+
+        target_key = select_key or self.saved_engine_key or "bing"
+        selected_label = TranslationEngine.get_provider_display_name(target_key, cur_model)
+        if selected_label not in self.provider_labels:
+            selected_label = self.provider_labels[0]
+
+        if not hasattr(self, "var_engine"):
+            self.var_engine = tk.StringVar(value=selected_label)
+            self.cb_engine["textvariable"] = self.var_engine
+        else:
+            self.var_engine.set(selected_label)
+
     def _get_selected_provider_key(self) -> str:
         cur_label = self.var_engine.get()
+        if "AI 大模型" in cur_label or "自定义" in cur_label:
+            return "custom_llm"
         for k, v in TranslationEngine.PROVIDERS.items():
             if v == cur_label:
                 return k
@@ -334,11 +353,12 @@ class TranslatorModule(BaseAppModule):
         def _save_and_close():
             self.llm_config["base_url"] = var_url.get().strip()
             self.llm_config["api_key"] = var_key.get().strip()
-            self.llm_config["model"] = var_model.get().strip()
-            self.var_engine.set(TranslationEngine.PROVIDERS["custom_llm"])
+            actual_model = var_model.get().strip()
+            self.llm_config["model"] = actual_model
+            self._refresh_engine_combobox(select_key="custom_llm")
             self._save_preferences()
             dlg.destroy()
-            messagebox.showinfo("已保存", f"AI 大模型配置成功！\n\n• 当前模型: {self.llm_config['model']}\n• 默认引擎已锁定为: DeepSeek/AI 大模型\n• 下次启动应用将自动默认使用该引擎！", parent=self.container)
+            messagebox.showinfo("已保存", f"AI 大模型配置成功！\n\n• 当前生效模型: {actual_model}\n• 翻译引擎已切换为: 🤖 AI 大模型 ({actual_model})\n• 下次启动将自动默认使用该模型！", parent=self.container)
             self.trigger_translation()
 
         btn_box = ttk.Frame(f)
